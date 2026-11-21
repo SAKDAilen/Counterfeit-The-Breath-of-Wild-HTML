@@ -1,0 +1,11813 @@
+
+// ---------------------------------------------------------------------------
+// Three.js loader: local vendor copy first (works offline when the game is
+// served by server/index.js), CDN fallback for the standalone file:// build.
+// ---------------------------------------------------------------------------
+let THREE = null;
+async function loadThree(){
+  const local = './assets/three.module.js';
+  const cdns = [
+    'https://unpkg.com/three@0.160.0/build/three.module.js',
+    'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js',
+  ];
+  const order = location.protocol === 'file:' ? [...cdns, local] : [local, ...cdns];
+  for(const url of order){
+    try { const m = await import(url); if(m && m.WebGLRenderer) return m; }
+    catch(e){ console.warn('[three] failed to load', url, e && e.message); }
+  }
+  throw new Error('Three.js 无法加载 / Three.js failed to load');
+}
+try {
+  THREE = await loadThree();
+} catch(err){
+  const ov = document.getElementById('fatalOverlay');
+  if(ov){ ov.style.display='flex'; ov.querySelector('.fatal-msg').textContent = String(err && err.message || err); }
+  throw err;
+}
+
+const $ = id => document.getElementById(id);
+const clamp = (v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp = (a,b,t)=>a+(b-a)*t;
+const smoothstep = (a,b,t)=>{ const x=clamp((t-a)/(b-a),0,1); return x*x*(3-2*x); };
+const rand = (a,b)=>a+Math.random()*(b-a);
+const randInt = (a,b)=>Math.floor(rand(a,b+1));
+
+// ============================================================
+// 加载进度（让浏览器有机会绘制，避免长时间黑屏）
+// ============================================================
+const nextFrame = ()=>new Promise(r=>requestAnimationFrame(()=>r()));
+function setLoading(pct,text){
+  const fill=document.getElementById('loadFill');
+  const st=document.getElementById('loadStatus');
+  if(fill) fill.style.width=Math.round(clamp(pct,0,1)*100)+'%';
+  if(st&&text) st.textContent=text;
+}
+async function loadingStep(pct,text){
+  setLoading(pct,text);
+  await nextFrame();
+  await nextFrame();
+}
+let APP_READY=false;
+function finishLoading(){
+  APP_READY=true;
+  setLoading(1,'完成');
+  const ov=document.getElementById('loadingOverlay');
+  if(ov){
+    ov.style.pointerEvents='none';
+    ov.style.opacity='0';
+    setTimeout(()=>{ ov.style.display='none'; },700);
+  }
+  const pre=document.getElementById('startOverlay');
+  if(pre && new URLSearchParams(location.search).get('autostart')==='1'){
+    setTimeout(()=>pre.click(), 300);
+  }
+}
+window.addEventListener('error', e=>{
+  try{
+    const ov=document.getElementById('fatalOverlay');
+    if(ov && !APP_READY){
+      ov.style.display='flex';
+      const m=ov.querySelector('.fatal-msg');
+      if(m) m.textContent=(e.message||'Unknown error')+'\n'+(e.filename||'')+':'+(e.lineno||'');
+    }
+  }catch(_){}
+});
+window.addEventListener('unhandledrejection', e=>{
+  console.error('[unhandledrejection]', e.reason);
+});
+
+// ============================================================
+// 音频
+// ============================================================
+let AC = null;
+function initAudio(){ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); }
+function tone(freq,dur=0.08,type='sine',vol=0.08,slideTo=null){
+  if(!AC) return;
+  const o=AC.createOscillator(), g=AC.createGain();
+  o.type=type; o.frequency.setValueAtTime(freq,AC.currentTime);
+  if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo,AC.currentTime+dur);
+  g.gain.setValueAtTime(vol,AC.currentTime); g.gain.exponentialRampToValueAtTime(0.0001,AC.currentTime+dur);
+  o.connect(g).connect(AC.destination); o.start(); o.stop(AC.currentTime+dur+0.02);
+}
+function noiseBurst(dur=0.2,vol=0.1,filterFreq=800){
+  if(!AC) return;
+  const len=Math.floor(AC.sampleRate*dur), buf=AC.createBuffer(1,len,AC.sampleRate), d=buf.getChannelData(0);
+  for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2);
+  const src=AC.createBufferSource(); src.buffer=buf;
+  const f=AC.createBiquadFilter(); f.type='lowpass'; f.frequency.value=filterFreq;
+  const g=AC.createGain(); g.gain.value=vol; g.gain.exponentialRampToValueAtTime(0.0001,AC.currentTime+dur);
+  src.connect(f).connect(g).connect(AC.destination); src.start();
+}
+const SFX = {
+  swing(){ noiseBurst(0.12,0.06,2200); tone(180,0.08,'triangle',0.03,90); },
+  swingHeavy(){ noiseBurst(0.2,0.09,1600); tone(140,0.15,'triangle',0.04,70); },
+  hit(){ noiseBurst(0.1,0.12,600); tone(90,0.1,'square',0.04,50); },
+  crit(){ noiseBurst(0.15,0.18,400); tone(140,0.15,'square',0.06,60); tone(280,0.1,'sine',0.04,140); },
+  footstep(){ noiseBurst(0.05,0.025,400); },
+  stepSoft(){ noiseBurst(0.04,0.014,300); },
+  jump(){ tone(320,0.12,'sine',0.04,560); },
+  roll(){ noiseBurst(0.25,0.05,350); },
+  rune(){ tone(660,0.15,'sine',0.05,880); tone(440,0.2,'triangle',0.03,220); },
+  bomb(){ noiseBurst(0.5,0.22,300); tone(60,0.4,'sawtooth',0.08,20); },
+  laser(){ tone(1200,0.4,'sawtooth',0.04,300); },
+  hurt(){ tone(160,0.18,'square',0.07,60); },
+  dialog(){ tone(520,0.06,'sine',0.03); },
+  loot(){ tone(880,0.08,'sine',0.05); tone(1320,0.12,'sine',0.04); },
+  teleport(){ tone(300,0.6,'sine',0.06,1400); tone(1200,0.5,'triangle',0.035,300); noiseBurst(0.6,0.06,3000); },
+  champion(){ tone(220,0.4,'triangle',0.06,880); tone(660,0.5,'sine',0.04,1320); },
+  divine(){ tone(110,1.2,'sawtooth',0.05,220); tone(330,1.0,'sine',0.04,440); },
+  bossRoar(){ noiseBurst(0.8,0.18,180); tone(60,0.8,'sawtooth',0.09,30); },
+  cook(){ tone(440,0.1,'sine',0.04); tone(660,0.15,'sine',0.04); tone(880,0.2,'sine',0.03); },
+  break(){ noiseBurst(0.2,0.1,1200); tone(200,0.15,'square',0.05,80); },
+  korok(){ tone(880,0.1,'sine',0.05,1320); tone(1320,0.15,'sine',0.04,1760); },
+  shrineSolve(){ tone(523,0.15,'sine',0.05); tone(659,0.15,'sine',0.05); tone(784,0.25,'sine',0.05); tone(1047,0.4,'sine',0.04); },
+  thunder(){ noiseBurst(1.2,0.3,120); tone(45,1.0,'sawtooth',0.1,20); },
+  shieldBlock(){ noiseBurst(0.15,0.15,900); tone(240,0.12,'square',0.05,120); },
+  shieldBreak(){ noiseBurst(0.3,0.2,600); tone(180,0.2,'sawtooth',0.06,60); },
+  death(){ tone(220,0.8,'sawtooth',0.06,60); tone(110,1.2,'triangle',0.05,40); noiseBurst(0.6,0.1,300); },
+  revive(){ tone(330,0.4,'sine',0.05,660); tone(660,0.6,'sine',0.04,990); },
+  surf(){ noiseBurst(0.5,0.06,600); },
+};
+// ------------------------------------------------------------
+// Procedural ambience: wind bed, rain layer, birds and night crickets.
+// No audio files are loaded — every sample is generated in Web Audio.
+// ------------------------------------------------------------
+let AMB=null, _ambBirdT=3, _ambCricketT=4;
+function startAmbient(){
+  if(!AC||AMB) return;
+  try{
+    if(AC.state==='suspended') AC.resume().catch(()=>{});
+    const master=AC.createGain(); master.gain.value=0.0; master.connect(AC.destination);
+    // brown-ish wind noise loop
+    const len=Math.floor(AC.sampleRate*5);
+    const buf=AC.createBuffer(1,len,AC.sampleRate);
+    const arr=buf.getChannelData(0);
+    let last=0;
+    for(let i=0;i<len;i++){ const white=Math.random()*2-1; last=(last+0.018*white)/1.018; arr[i]=last*2.8; }
+    const wind=AC.createBufferSource(); wind.buffer=buf; wind.loop=true;
+    const windFilter=AC.createBiquadFilter(); windFilter.type='bandpass'; windFilter.frequency.value=380; windFilter.Q.value=0.7;
+    const windGain=AC.createGain(); windGain.gain.value=0.022;
+    wind.connect(windFilter).connect(windGain).connect(master); wind.start();
+    // rain layer (filtered noise, gain is driven by weather)
+    const rlen=Math.floor(AC.sampleRate*3);
+    const rbuf=AC.createBuffer(1,rlen,AC.sampleRate), rd=rbuf.getChannelData(0);
+    for(let i=0;i<rlen;i++) rd[i]=(Math.random()*2-1)*0.5;
+    const rain=AC.createBufferSource(); rain.buffer=rbuf; rain.loop=true;
+    const rainFilter=AC.createBiquadFilter(); rainFilter.type='highpass'; rainFilter.frequency.value=1200;
+    const rainGain=AC.createGain(); rainGain.gain.value=0;
+    rain.connect(rainFilter).connect(rainGain).connect(master); rain.start();
+    // distant harmonic drone
+    const padGain=AC.createGain(); padGain.gain.value=0.008; padGain.connect(master);
+    for(const [f,d] of [[55,0],[82.5,0.3]]){
+      const o=AC.createOscillator(); o.type='sine'; o.frequency.value=f;
+      const g=AC.createGain(); g.gain.value=d?0.4:0.6; o.connect(g).connect(padGain); o.start();
+    }
+    AMB={master,windGain,rainGain,padGain};
+    master.gain.linearRampToValueAtTime(0.9,AC.currentTime+2.5);
+  }catch(e){ AMB=null; }
+}
+function updateAmbient(dt){
+  if(!AMB||!AC) return;
+  try{
+    const raining=(weather.type==='rain'||weather.type==='thunder');
+    const now=AC.currentTime;
+    AMB.rainGain.gain.setTargetAtTime(raining?0.055:0,now,0.7);
+    AMB.windGain.gain.setTargetAtTime(weather.type==='fog'?0.009:raining?0.042:0.022,now,0.8);
+    AMB.padGain.gain.setTargetAtTime(timeOfDay>0.78||timeOfDay<0.22?0.013:0.006,now,1.0);
+    _ambBirdT-=dt;
+    if(_ambBirdT<=0&&timeOfDay>0.22&&timeOfDay<0.76&&!raining){
+      _ambBirdT=rand(4,11);
+      const base=rand(1600,2600);
+      tone(base,0.08,'sine',0.015,base*1.3);
+      setTimeout(()=>{ try{ tone(base*1.18,0.1,'sine',0.012,base*0.8); }catch(e){} },140);
+    }
+    _ambCricketT-=dt;
+    if(_ambCricketT<=0&&(timeOfDay>0.78||timeOfDay<0.20)){
+      _ambCricketT=rand(0.8,2.2);
+      tone(rand(3200,4300),0.035,'triangle',0.007,rand(3000,4500));
+    }
+  }catch(e){}
+}
+
+// ============================================================
+// 场景
+// ============================================================
+const scene = new THREE.Scene();
+let grassMeshRef=null, cloudMeshRef=null;
+scene.background = new THREE.Color(0x9cb8c4);
+scene.fog = new THREE.FogExp2(0xa9bec2, 0.00068);
+const camera = new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.1, 3500);
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference:'high-performance', stencil:false });
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.4));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.autoUpdate = false;
+renderer.shadowMap.needsUpdate = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+document.body.appendChild(renderer.domElement);
+
+// ============================================================
+// 卡通材质 + 缓存
+// ============================================================
+const TOON_MATERIALS=[];
+function makeToonMaterial(baseColor, opts={}){
+  const side=opts.side!==undefined?opts.side:THREE.FrontSide;
+  const c = new THREE.Color(baseColor);
+  const shadowCol = opts.shadowColor ? new THREE.Color(opts.shadowColor) : c.clone().multiplyScalar(0.55);
+  const mat = new THREE.ShaderMaterial({
+    side:side,
+    uniforms:{
+      uBase:{value:c}, uShadow:{value:shadowCol},
+      uSteps:{value:opts.steps||3},
+      uRimColor:{value:new THREE.Color(opts.rimColor||0xaaddff)},
+      uRimPower:{value:opts.rimPower||3.0},
+      uEmissive:{value:new THREE.Color(opts.emissive||0x000000)},
+      uEmissiveIntensity:{value:opts.emissiveIntensity||0},
+      uLightDir:{value:new THREE.Vector3(0.5,1,0.3).normalize()},
+      uLightI:{value:1},
+      uAmbient:{value:0.46},
+      uNight:{value:0},
+      uTime:{value:0},
+      uWind:{value:opts.wind||0},
+      uFogColor:{value:new THREE.Color(0xa9bec2)},
+      uFogDensity:{value:0.00092},
+    },
+    vertexShader:`
+      uniform float uTime; uniform float uWind;
+      varying vec3 vNormal; varying vec3 vWorldPos; varying vec3 vViewDir; varying vec3 vInstColor;
+      void main(){
+        vec4 p = vec4(position, 1.0);
+        vec3 n = normal;
+        #ifdef USE_INSTANCING
+          p = instanceMatrix * p;
+          n = mat3(instanceMatrix) * n;
+        #endif
+        if(uWind>0.001){
+          float bladeH = max(position.y, 0.0);
+          float sway = sin(uTime*1.75 + p.x*0.19 + p.z*0.14) * uWind * bladeH;
+          p.x += sway;
+          p.z += sway * 0.42;
+        }
+        vec4 wp = modelMatrix * p;
+        vWorldPos = wp.xyz;
+        vViewDir = normalize(cameraPosition - wp.xyz);
+        vNormal = normalize(normalMatrix * n);
+        #ifdef USE_INSTANCING_COLOR
+          vInstColor = instanceColor;
+        #else
+          vInstColor = vec3(1.0);
+        #endif
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader:`
+      uniform vec3 uBase, uShadow, uRimColor, uEmissive, uFogColor;
+      uniform float uSteps, uRimPower, uEmissiveIntensity, uAmbient, uFogDensity, uLightI, uNight;
+      uniform vec3 uLightDir;
+      varying vec3 vNormal; varying vec3 vWorldPos; varying vec3 vViewDir; varying vec3 vInstColor;
+      void main(){
+        vec3 N = normalize(vNormal);
+        float ndl = max(dot(N, normalize(uLightDir)), 0.0);
+        float q = floor(ndl * uSteps) / uSteps;
+        q = mix(q, ndl, 0.25);
+        vec3 base = uBase * vInstColor;
+        vec3 shadow = uShadow * vInstColor;
+        vec3 col = mix(shadow, base, clamp(q * uLightI + uAmbient, 0.0, 1.0));
+        float rim = pow(1.0 - max(dot(N, normalize(vViewDir)), 0.0), uRimPower);
+        col += uRimColor * rim * 0.35;
+        col *= mix(vec3(1.0), vec3(0.62, 0.74, 1.06), uNight);
+        col += uEmissive * uEmissiveIntensity;
+        float fogDist = distance(cameraPosition, vWorldPos);
+        float fogF = 1.0 - exp(-uFogDensity * uFogDensity * fogDist * fogDist);
+        col = mix(col, uFogColor, clamp(fogF, 0.0, 1.0));
+        gl_FragColor = vec4(col, 1.0);
+      }`
+  });
+  TOON_MATERIALS.push(mat);
+  return mat;
+}
+const _matCache={};
+function toon(color,opts={}){
+  const key=color+'|'+(opts.steps||3)+'|'+(opts.rimColor||'')+'|'+(opts.shadowColor||'')+'|'+(opts.rimPower||3)+'|'+(opts.emissive||'')+'|'+(opts.emissiveIntensity||0)+'|wind'+(opts.wind||0)+'|side'+(opts.side||0);
+  if(!_matCache[key]) _matCache[key]=makeToonMaterial(color,opts);
+  return _matCache[key];
+}
+
+// ============================================================
+// ★ 实例化 / 静态合并（性能核心）
+// ============================================================
+const _iM4=new THREE.Matrix4(), _iQ=new THREE.Quaternion(), _iE=new THREE.Euler(), _iP=new THREE.Vector3(), _iS=new THREE.Vector3();
+function buildInstancedMesh(geo, mat, items, opts={}){
+  if(!items.length) return null;
+  const mesh=new THREE.InstancedMesh(geo, mat, items.length);
+  mesh.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+  for(let i=0;i<items.length;i++){
+    const it=items[i];
+    _iP.set(it.x||0, it.y||0, it.z||0);
+    _iS.set(it.sx!==undefined?it.sx:(it.s||1), it.sy!==undefined?it.sy:(it.s||1), it.sz!==undefined?it.sz:(it.s||1));
+    _iE.set(it.rx||0, it.ry||0, it.rz||0);
+    _iQ.setFromEuler(_iE);
+    _iM4.compose(_iP,_iQ,_iS);
+    mesh.setMatrixAt(i,_iM4);
+    if(it.color) mesh.setColorAt(i, it.color);
+  }
+  mesh.instanceMatrix.needsUpdate=true;
+  if(mesh.instanceColor) mesh.instanceColor.needsUpdate=true;
+  mesh.castShadow=opts.castShadow!==false;
+  mesh.receiveShadow=!!opts.receiveShadow;
+  mesh.frustumCulled=opts.frustumCulled!==false;
+  mesh.matrixAutoUpdate=false;
+  if(opts.name) mesh.name=opts.name;
+  return mesh;
+}
+
+// 合并一组非索引几何体（含法线/UV），返回新的 BufferGeometry
+function mergeGeometryEntries(entries){
+  if(entries.length===0) return null;
+  if(entries.length===1){
+    const g=entries[0].geo.clone().applyMatrix4(entries[0].matrix);
+    return g;
+  }
+  let totalVerts=0;
+  const prepared=[];
+  for(const e of entries){
+    const g=(e.geo.index? e.geo.toNonIndexed(): e.geo.clone()).applyMatrix4(e.matrix);
+    const pos=g.attributes.position;
+    if(!pos) continue;
+    totalVerts+=pos.count;
+    prepared.push(g);
+  }
+  if(prepared.length===0) return null;
+  const positions=new Float32Array(totalVerts*3);
+  const normals=new Float32Array(totalVerts*3);
+  const uvs=new Float32Array(totalVerts*2);
+  let o=0;
+  for(const g of prepared){
+    const pos=g.attributes.position, nor=g.attributes.normal, uv=g.attributes.uv;
+    positions.set(pos.array,o*3);
+    if(nor) normals.set(nor.array,o*3);
+    if(uv) uvs.set(uv.array,o*2);
+    o+=pos.count;
+    g.dispose();
+  }
+  const out=new THREE.BufferGeometry();
+  out.setAttribute('position',new THREE.BufferAttribute(positions,3));
+  out.setAttribute('normal',new THREE.BufferAttribute(normals,3));
+  if(prepared.some(g=>g.attributes.uv)) out.setAttribute('uv',new THREE.BufferAttribute(uvs,2));
+  out.computeBoundingSphere();
+  return out;
+}
+
+// 把静态建筑按材质合并，显著减少 draw call（保留动画组请打 noMerge 标记）
+function mergeStaticGroup(root){
+  if(!root) return;
+  root.updateMatrixWorld(true);
+  const inv=new THREE.Matrix4().copy(root.matrixWorld).invert();
+  const buckets=new Map();
+  root.traverse(o=>{
+    if(!o.isMesh||o.isInstancedMesh||o.isSkinnedMesh) return;
+    if(!o.geometry||o.userData.noMerge) return;
+    if(!o.visible) return;
+    if(Array.isArray(o.material)||!o.material||o.material.transparent) return;
+    const m=new THREE.Matrix4().multiplyMatrices(inv,o.matrixWorld);
+    let b=buckets.get(o.material);
+    if(!b){ b={entries:[],meshes:[],cast:false,receive:false}; buckets.set(o.material,b); }
+    b.entries.push({geo:o.geometry,matrix:m});
+    b.meshes.push(o);
+    b.cast=b.cast||o.castShadow; b.receive=b.receive||o.receiveShadow;
+  });
+  let merged=0;
+  for(const [mat,b] of buckets){
+    if(b.entries.length<2) continue;
+    const geo=mergeGeometryEntries(b.entries);
+    if(!geo) continue;
+    const mesh=new THREE.Mesh(geo,mat);
+    mesh.castShadow=b.cast; mesh.receiveShadow=b.receive;
+    mesh.matrixAutoUpdate=false;
+    root.add(mesh);
+    for(const o of b.meshes){ if(o.parent) o.parent.remove(o); }
+    merged++;
+  }
+  // 清理已经空转的中间 Group
+  root.traverse(o=>{ if(o.isGroup && o!==root && o.children.length===0) o.userData.__empty=true; });
+  return merged;
+}
+function markNoMerge(obj){
+  obj.traverse(o=>{ o.userData.noMerge=true; });
+  return obj;
+}
+
+// ============================================================
+// 地形
+// ============================================================
+const WORLD_X=3000, WORLD_Z=2400, HALF_X=WORLD_X/2, HALF_Z=WORLD_Z/2;
+const SEG_X=400, SEG_Z=320;
+function hash2(x,y){ let n=Math.sin(x*127.1+y*311.7)*43758.5453; return n-Math.floor(n); }
+function smooth(t){ return t*t*(3-2*t); }
+function valueNoise(x,y){
+  const xi=Math.floor(x), yi=Math.floor(y), xf=x-xi, yf=y-yi;
+  const a=hash2(xi,yi), b=hash2(xi+1,yi), c=hash2(xi,yi+1), d=hash2(xi+1,yi+1);
+  return lerp(lerp(a,b,smooth(xf)),lerp(c,d,smooth(xf)),smooth(yf));
+}
+function fbm(x,y,oct=5){ let v=0,amp=0.5,freq=1; for(let i=0;i<oct;i++){ v+=amp*valueNoise(x*freq,y*freq); amp*=0.5; freq*=2; } return v; }
+function ridgedNoise(x,y,oct=4){
+  let v=0, amp=0.5, freq=1, weight=1;
+  for(let i=0;i<oct;i++){
+    let n = 1 - Math.abs(valueNoise(x*freq, y*freq)*2-1);
+    n = n*n;
+    v += n*amp*weight;
+    weight = clamp(n*2, 0, 1);
+    amp *= 0.5; freq *= 2;
+  }
+  return v;
+}
+const RIVERS = [
+  [[0,-75],[10,50],[40,200],[30,375],[5,525],[0,650],[0,900],[0,1050]],
+  [[775,-200],[700,-50],[625,100],[550,250],[475,375]],
+  [[-775,-650],[-675,-500],[-575,-325],[-500,-125],[-475,100]],
+  [[-700,650],[-600,725],[-475,775],[-350,825],[-250,875]],
+  [[625,725],[575,825],[525,925],[475,1025]],
+];
+function pointToSegDist(px,pz,ax,az,bx,bz){
+  const dx=bx-ax, dz=bz-az, l2=dx*dx+dz*dz;
+  let t = l2>0 ? ((px-ax)*dx+(pz-az)*dz)/l2 : 0;
+  t = clamp(t,0,1);
+  return Math.hypot(px-(ax+t*dx), pz-(az+t*dz));
+}
+function riverDist(x,z){
+  let minD = Infinity;
+  for(const river of RIVERS){
+    for(let i=0;i<river.length-1;i++){
+      const d = pointToSegDist(x,z,river[i][0],river[i][1],river[i+1][0],river[i+1][1]);
+      if(d<minD) minD=d;
+    }
+  }
+  return minD;
+}
+function terrainHeight(x,z){
+  const nx=x/HALF_X, nz=z/HALF_Z;
+  let h = Math.pow(fbm(nx*4.5+7, nz*4.5+13, 5), 1.3) * 160;
+  const ridge = ridgedNoise(nx*3.2+20, nz*3.2+40, 4);
+  h += ridge * 110;
+  const edgeDist=1-Math.max(Math.abs(nx),Math.abs(nz));
+  if(edgeDist<0.08) h=lerp(-30,h,smoothstep(0,0.08,edgeDist));
+  const distCenter=Math.hypot(nx,nz*0.8);
+  h=lerp(h,25+h*0.04,smoothstep(0,1,1-distCenter/0.28)*0.88);
+  const gpDist=Math.hypot(nx-(-0.05),nz-0.18);
+  if(gpDist<0.075){ const t=smoothstep(0.075,0.02,gpDist); h=lerp(h,82+Math.sin(t*Math.PI)*10,t); }
+  const deathDist=Math.hypot(nx-0.55,nz-(-0.45));
+  if(deathDist<0.22){ const t=clamp(1-deathDist/0.22,0,1); h += Math.pow(t,1.6)*560; if(deathDist<0.03) h -= (1-deathDist/0.03)*80; }
+  const hebraDist=Math.hypot(nx-(-0.62),nz-(-0.55));
+  if(hebraDist<0.28){ const t=clamp(1-hebraDist/0.28,0,1); h += Math.pow(t,1.4)*420; }
+  const gerudoHigh=Math.hypot(nx-(-0.55),nz-0.45);
+  if(gerudoHigh<0.22){ const t=clamp(1-gerudoHigh/0.22,0,1); h += Math.pow(t,1.5)*340; }
+  const gerudoDesert=Math.hypot(nx-(-0.30),nz-0.55);
+  if(gerudoDesert<0.18){ const t=clamp(1-gerudoDesert/0.18,0,1); h=lerp(h,8+Math.sin(nx*40)*3+Math.sin(nz*35)*2,smoothstep(0,1,t)*0.9); }
+  if(nx>-0.4 && nx<-0.1 && nz>0.3 && nz<0.65){
+    const canyonCenter = -0.25 + Math.sin(nz*15)*0.04;
+    const canyonDist = Math.abs(nx - canyonCenter);
+    if(canyonDist < 0.03){ const t = 1 - canyonDist/0.03; h -= t*t*45; }
+  }
+  const lanayruDist=Math.hypot(nx-0.48,nz-0.32);
+  if(lanayruDist<0.18){ const t=clamp(1-lanayruDist/0.18,0,1); h += Math.pow(t,1.4)*300; }
+  const lanayruWet=Math.hypot(nx-0.35,nz-0.12);
+  if(lanayruWet<0.12){ const t=clamp(1-lanayruWet/0.12,0,1); h=lerp(h,14,smoothstep(0,1,t)*0.75); }
+  const akkalaDist=Math.hypot(nx-0.68,nz-(-0.10));
+  if(akkalaDist<0.16){ const t=clamp(1-akkalaDist/0.16,0,1); h += Math.pow(t,1.2)*130; }
+  const faronDist=Math.hypot(nx-0.35,nz-0.68);
+  if(faronDist<0.15){ const t=clamp(1-faronDist/0.15,0,1); h=lerp(h,18+Math.sin(nz*20)*4,smoothstep(0,1,t)*0.8); }
+  const lakeDist=Math.hypot(nx-0.02,nz-0.32);
+  if(lakeDist<0.06){ const t=clamp(1-lakeDist/0.06,0,1); h -= t*t*50; }
+  const rDist = riverDist(x,z);
+  const riverWidth = 26;
+  if(rDist < riverWidth*2.5){
+    const t = 1 - clamp(rDist/(riverWidth*2.5),0,1);
+    const core = 1 - clamp(rDist/riverWidth,0,1);
+    h -= (smoothstep(0,1,t)*3 + core*core*16);
+  }
+  const finalEdge=1-Math.max(Math.abs(nx),Math.abs(nz));
+  if(finalEdge<0.03) h=lerp(-40,h,smoothstep(0,0.03,finalEdge));
+  return h;
+}
+const WATER_LEVEL=4.0;
+function isWater(x,z){ return terrainHeight(x,z)<WATER_LEVEL; }
+function terrainSlope(x,z){
+  const e=3;
+  const hx=terrainHeight(x+e,z)-terrainHeight(x-e,z);
+  const hz=terrainHeight(x,z+e)-terrainHeight(x,z-e);
+  return Math.hypot(hx,hz)/(2*e);
+}
+await loadingStep(0.05,'生成海拉鲁地形');
+(function buildTerrain(){
+  // Higher density mesh: 400 x 320 quads (~7.5m spacing) removes the coarse
+  // triangular silhouette that was visible on nearby hills.
+  const NX=400, NZ=320, ROW=NX+1, DXN=WORLD_X/NX, DZN=WORLD_Z/NZ;
+  const geo=new THREE.PlaneGeometry(WORLD_X,WORLD_Z,NX,NZ);
+  geo.rotateX(-Math.PI/2);
+  const pos=geo.attributes.position;
+  const count=pos.count;
+  const colors=new Float32Array(count*3);
+  const normals=new Float32Array(count*3);
+  const cSnow=new THREE.Color(0xe8eef2), cSnowCap=new THREE.Color(0xf4f8fc);
+  const cRock=new THREE.Color(0x6b6055), cRockDark=new THREE.Color(0x4a4238);
+  const cGrass=new THREE.Color(0x52713c), cGrassDark=new THREE.Color(0x334d29);
+  const cGrassDry=new THREE.Color(0x7e8050), cSand=new THREE.Color(0xc8b888);
+  const cAsh=new THREE.Color(0x2a1a16);
+  const cMud=new THREE.Color(0x4a4232), cDesert=new THREE.Color(0xd8c890);
+  const cDesertDeep=new THREE.Color(0xb8a870);
+  const cVolcanic=new THREE.Color(0x3a2a22), cVolcanicHot=new THREE.Color(0x6a3020);
+  const cFaron=new THREE.Color(0x2f5a2a);
+  const cHighland=new THREE.Color(0x8a7a5a);
+  const tmp=new THREE.Color();
+
+  // Sample heights once; colours and analytic normals share the same samples so
+  // lighting gradients stay continuous instead of per-face.
+  const heights=new Float32Array(count);
+  for(let i=0;i<count;i++) heights[i]=terrainHeight(pos.getX(i),pos.getZ(i));
+
+  for(let iy=0;iy<=NZ;iy++){
+    for(let ix=0;ix<=NX;ix++){
+      const i=iy*ROW+ix;
+      const x=pos.getX(i), z=pos.getZ(i);
+      const h=heights[i];
+      pos.setY(i,h);
+      const iL=iy*ROW+Math.max(0,ix-1), iR=iy*ROW+Math.min(NX,ix+1);
+      const iD=Math.max(0,iy-1)*ROW+ix, iU=Math.min(NZ,iy+1)*ROW+ix;
+      const gx=(heights[iR]-heights[iL])/(2*DXN);
+      const gz=(heights[iU]-heights[iD])/(2*DZN);
+      const slope=Math.hypot(gx,gz);
+      const inv=1/Math.sqrt(gx*gx+1+gz*gz);
+      normals[i*3]=-gx*inv; normals[i*3+1]=inv; normals[i*3+2]=-gz*inv;
+
+      const nx=x/HALF_X, nz=z/HALF_Z;
+      const deathDist=Math.hypot(nx-0.55,nz-(-0.45));
+      const hebraDist=Math.hypot(nx-(-0.62),nz-(-0.55));
+      const gerudoDist=Math.hypot(nx-(-0.30),nz-0.55);
+      const faronDist=Math.hypot(nx-0.35,nz-0.68);
+      const rDist=riverDist(x,z);
+      const patch=valueNoise(x*0.022,z*0.022), patch2=valueNoise(x*0.09+50,z*0.09+50);
+      const fine=valueNoise(x*0.31+11,z*0.31+11);
+
+      // Base meadow, blended (not switched) toward sand / rock / highland / snow.
+      tmp.copy(cGrass).lerp(cGrassDry,patch*0.42).lerp(cGrassDark,patch2*0.14);
+      tmp.lerp(cSand, clamp((WATER_LEVEL+6-h)/6,0,1)*0.85);
+      tmp.lerp(cRock, clamp((slope-0.30)*1.7,0,1)*0.92);
+      tmp.lerp(cHighland, clamp((h-175)/150,0,1)*0.55);
+      const snowW=clamp((h-390)/230,0,1)*clamp(0.90-slope*0.85,0,1);
+      tmp.lerp(cSnow,snowW);
+      tmp.lerp(cSnowCap,clamp((h-540)/160,0,1)*0.55);
+
+      // Regional tints as smooth weights, so biome borders no longer show as rings.
+      const deathW=smoothstep(0.18,0.02,deathDist)*smoothstep(80,130,h);
+      if(deathW>0){
+        tmp.lerp(cVolcanic,deathW*0.9);
+        tmp.lerp(cVolcanicHot,deathW*clamp((h-250)/220,0,0.55));
+        tmp.lerp(cAsh,deathW*valueNoise(x*0.09,z*0.09)*0.4);
+        tmp.lerp(cRockDark,deathW*clamp(slope*1.4,0,0.35));
+      }
+      const hebraW=smoothstep(0.22,0.02,hebraDist)*smoothstep(90,140,h);
+      if(hebraW>0) tmp.lerp(cSnow,hebraW*clamp((h-110)/300,0,0.8));
+      const gerudoW=smoothstep(0.16,0.02,gerudoDist)*smoothstep(35,12,h);
+      if(gerudoW>0){
+        tmp.lerp(cDesert,gerudoW*0.94);
+        tmp.lerp(cDesertDeep,gerudoW*valueNoise(x*0.05,z*0.05)*0.4);
+      }
+      const faronW=smoothstep(0.12,0.02,faronDist)*smoothstep(52,30,h);
+      if(faronW>0) tmp.lerp(cFaron,faronW*0.65);
+      const riverW=smoothstep(38,16,rDist)*smoothstep(WATER_LEVEL+10,WATER_LEVEL+2,h);
+      if(riverW>0){
+        tmp.lerp(cMud,riverW*0.9);
+        tmp.lerp(cSand,riverW*clamp((h-WATER_LEVEL+4)/8,0,1)*0.65);
+      }
+
+      // Cheap curvature AO: concave hollows sit a touch darker, ridges catch light.
+      const lap=(heights[iL]+heights[iR]+heights[iD]+heights[iU])*0.25-h;
+      const ao=clamp(1-lap*0.055,0.80,1.06);
+      const grain=(0.978+hash2(x*0.11,z*0.13)*0.042)*(0.982+fine*0.028);
+      const m=grain*ao;
+      colors[i*3]=tmp.r*m; colors[i*3+1]=tmp.g*m; colors[i*3+2]=tmp.b*m;
+    }
+  }
+  geo.setAttribute('color',new THREE.BufferAttribute(colors,3));
+  geo.setAttribute('normal',new THREE.BufferAttribute(normals,3));
+  const mat=new THREE.MeshStandardMaterial({vertexColors:true, roughness:0.9, metalness:0.02});
+  // Procedural surface detail: no texture images, just world-space hashed noise.
+  mat.onBeforeCompile=(shader)=>{
+    shader.vertexShader=shader.vertexShader.replace(
+      '#include <common>',
+      '#include <common>\n varying vec3 vWPos; varying vec3 vWNormal;'
+    ).replace(
+      '#include <project_vertex>',
+      `#include <project_vertex>
+       vWPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+       vWNormal = normalize(mat3(modelMatrix) * objectNormal);`
+    );
+    shader.fragmentShader=shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
+       varying vec3 vWPos; varying vec3 vWNormal;
+       float hyHash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
+       float hyNoise(vec2 p){
+         vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+         return mix(mix(hyHash(i),hyHash(i+vec2(1.0,0.0)),f.x),
+                    mix(hyHash(i+vec2(0.0,1.0)),hyHash(i+vec2(1.0,1.0)),f.x),f.y);
+       }`
+    ).replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+       vec2 tp = vWPos.xz;
+       float macro = hyNoise(tp*0.045+vec2(11.3,7.7))*0.55 + hyNoise(tp*0.19+vec2(3.1,9.4))*0.45;
+       float micro = hyNoise(tp*0.19+vec2(3.1,9.4))*0.45 + hyNoise(tp*0.85)*0.55;
+       float flatness = smoothstep(0.45,0.95,vWNormal.y);
+       float dist = distance(cameraPosition, vWPos);
+       float near = 1.0 - smoothstep(70.0, 260.0, dist);
+       float nNear = 1.0 - smoothstep(18.0, 70.0, dist);
+       diffuseColor.rgb *= mix(0.965, 1.035, macro);
+       diffuseColor.rgb *= mix(mix(0.975,1.03,micro), 1.0, 1.0-near);
+       diffuseColor.rgb = mix(diffuseColor.rgb*vec3(0.95,0.96,0.94), diffuseColor.rgb*vec3(1.02,1.01,0.97), flatness);
+       diffuseColor.rgb += vec3(0.018,0.032,0.012) * smoothstep(0.70,0.94,micro) * flatness * near;`
+    ).replace(
+      '#include <normal_fragment_begin>',
+      `#include <normal_fragment_begin>
+       {
+         // World-space gradient noise nudges the normal so the surface reads as
+         // soft earth/grass rather than flat Gouraud triangles up close.
+         float e=0.55;
+         float n0=hyNoise(tp*0.55);
+         vec2 gr=vec2(hyNoise((tp+vec2(e,0.0))*0.55)-n0, hyNoise((tp+vec2(0.0,e))*0.55)-n0)/e;
+         float amp=0.45*nNear*flatness;
+         vec3 wn=normalize(vWNormal+vec3(-gr.x*amp,0.0,-gr.y*amp));
+         normal=normalize((viewMatrix*vec4(wn,0.0)).xyz);
+       }`
+    ).replace(
+      '#include <roughnessmap_fragment>',
+      `#include <roughnessmap_fragment>
+       roughnessFactor *= mix(0.94,1.08,micro);`
+    );
+  };
+  mat.customProgramCacheKey=()=> 'hyrule-terrain-v10';
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.receiveShadow=true; scene.add(mesh);
+})();
+
+// 水面
+const waterGeo=new THREE.PlaneGeometry(WORLD_X*1.4,WORLD_Z*1.4,80,60);
+waterGeo.rotateX(-Math.PI/2);
+const waterUniforms={
+  uTime:{value:0},
+  uDeep:{value:new THREE.Color(0x1a4a5a)},
+  uShallow:{value:new THREE.Color(0x4a9aaa)},
+  uSunDir:{value:new THREE.Vector3(0.5,1,0.3).normalize()},
+};
+const waterMat=new THREE.ShaderMaterial({
+  uniforms:waterUniforms, transparent:true, side:THREE.DoubleSide, depthWrite:false,
+  vertexShader:`
+    uniform float uTime; varying vec3 vWorldPos; varying vec3 vNormal;
+    void main(){
+      vec3 p=position;
+      float w1=sin(p.x*0.15+uTime*1.2)*cos(p.z*0.12+uTime*0.9)*0.35;
+      float w2=sin(p.x*0.06-uTime*0.7)*0.5;
+      p.y += w1+w2;
+      vWorldPos=(modelMatrix*vec4(p,1.0)).xyz;
+      float dx=cos(p.x*0.15+uTime*1.2)*0.15*cos(p.z*0.12+uTime*0.9);
+      float dz=-sin(p.x*0.15+uTime*1.2)*0.12*sin(p.z*0.12+uTime*0.9);
+      vNormal=normalize(vec3(-dx,1.0,-dz));
+      gl_Position=projectionMatrix*modelViewMatrix*vec4(p,1.0);
+    }`,
+  fragmentShader:`
+    uniform vec3 uDeep,uShallow,uSunDir; varying vec3 vWorldPos; varying vec3 vNormal;
+    void main(){
+      vec3 viewDir=normalize(cameraPosition-vWorldPos);
+      float fresnel=pow(1.0-max(dot(viewDir,normalize(vNormal)),0.0),3.0);
+      vec3 col=mix(uDeep,uShallow,fresnel);
+      vec3 halfV=normalize(viewDir+normalize(uSunDir));
+      float spec=pow(max(dot(normalize(vNormal),halfV),0.0),60.0);
+      col+=vec3(1.0,0.95,0.85)*spec*0.6;
+      gl_FragColor=vec4(col,0.75);
+    }`
+});
+const waterMesh=new THREE.Mesh(waterGeo,waterMat);
+waterMesh.position.y=WATER_LEVEL; scene.add(waterMesh);
+
+// 光照 / 天空
+const hemi=new THREE.HemisphereLight(0xbcd4e6,0x3a3a2a,1.1); scene.add(hemi);
+const sun=new THREE.DirectionalLight(0xfff2d8,2.0);
+sun.castShadow=true; sun.shadow.mapSize.set(3072,3072);
+sun.shadow.camera.left=-140; sun.shadow.camera.right=140;
+sun.shadow.camera.top=140; sun.shadow.camera.bottom=-140;
+sun.shadow.camera.near=1; sun.shadow.camera.far=1400;
+sun.shadow.bias=-0.0007; sun.shadow.normalBias=0.22;
+sun.shadow.camera.updateProjectionMatrix();
+scene.add(sun); scene.add(sun.target);
+const skyUniforms={
+  topColor:{value:new THREE.Color(0x3a6a9a)},
+  bottomColor:{value:new THREE.Color(0xc8d8d8)},
+  horizonColor:{value:new THREE.Color(0xdfe6dc)},
+  uSunDir:{value:new THREE.Vector3(0.4,0.8,0.2).normalize()},
+  uNight:{value:0},
+  uTime:{value:0},
+  uBlood:{value:0},
+  uSunI:{value:1},
+};
+const skyMat=new THREE.ShaderMaterial({
+  side:THREE.BackSide, depthWrite:false, fog:false,
+  uniforms:skyUniforms,
+  vertexShader:`varying vec3 vP; void main(){ vP=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }`,
+  fragmentShader:`
+    uniform vec3 topColor, bottomColor, horizonColor, uSunDir;
+    uniform float uNight, uTime, uBlood, uSunI;
+    varying vec3 vP;
+    float h21(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453); }
+    float h31(vec3 p){ return fract(sin(dot(p,vec3(127.1,311.7,74.7)))*43758.5453); }
+    void main(){
+      vec3 d=normalize(vP);
+      float up=max(d.y,0.0);
+      vec3 col=mix(horizonColor,bottomColor,smoothstep(-0.02,0.16,d.y));
+      col=mix(col,topColor,smoothstep(0.06,0.82,up));
+      // sun-side horizon wash
+      float sd=max(dot(d,uSunDir),0.0);
+      col+=vec3(1.0,0.46,0.16)*pow(sd,4.0)*0.28*uSunI;
+      col+=vec3(1.0,0.86,0.58)*pow(sd,48.0)*0.55*uSunI;
+      // sun disk
+      float disk=smoothstep(0.99935,0.99975,sd);
+      col+=vec3(3.6,3.1,2.2)*disk*uSunI;
+      // moon opposite the sun, softer disc with maria
+      vec3 moonDir=normalize(vec3(-uSunDir.x,-uSunDir.y,-uSunDir.z));
+      float md=max(dot(d,moonDir),0.0);
+      float moon=smoothstep(0.9990,0.99955,md);
+      float maria=smoothstep(0.25,0.6,h21(floor(d.xy*950.0)));
+      col+=vec3(0.82,0.90,1.0)*moon*(0.75+0.25*maria)*uNight;
+      col+=vec3(0.18,0.26,0.38)*pow(md,80.0)*uNight;
+      // stars: two procedural layers
+      if(uNight>0.01 && d.y>-0.02){
+        vec3 cell=floor(d*760.0);
+        float rnd=h31(cell);
+        float twinkle=0.55+0.45*sin(uTime*2.4+rnd*41.0);
+        float star=step(0.9972,rnd)*(0.45+0.55*twinkle);
+        col+=vec3(0.82,0.90,1.0)*star*uNight*1.35;
+        vec3 cell2=floor(d*310.0);
+        float rnd2=h31(cell2+17.0);
+        col+=vec3(0.55,0.70,1.0)*step(0.9987,rnd2)*uNight*1.1;
+      }
+      // faint high mist bands
+      float band=sin(d.x*13.0+d.z*9.0+uTime*0.012)*sin(d.z*17.0-d.x*4.0-uTime*0.008);
+      col+=vec3(0.16,0.19,0.20)*smoothstep(0.55,1.0,band)*smoothstep(0.15,0.55,d.y)*0.10;
+      // blood moon
+      col=mix(col, vec3(0.31,0.025,0.03), uBlood*0.56);
+      gl_FragColor=vec4(col,1.0);
+    }`
+});
+const skyDome=new THREE.Mesh(new THREE.SphereGeometry(2100,40,24),skyMat);
+skyDome.frustumCulled=false; scene.add(skyDome);
+const cloudGroup=new THREE.Group();
+(function buildClouds(){
+  const cloudMat=new THREE.MeshStandardMaterial({color:0xf2f5f7,roughness:1,transparent:true,opacity:0.65,depthWrite:false});
+  const geo=new THREE.SphereGeometry(1,6,5);
+  const instances=[];
+  for(let i=0;i<32;i++){
+    const ang=rand(0,Math.PI*2), dist=rand(400,1400);
+    const gx=Math.cos(ang)*dist, gy=rand(280,420), gz=Math.sin(ang)*dist;
+    for(let j=0,n=randInt(3,6);j<n;j++){
+      const r=rand(30,60);
+      instances.push({
+        x:gx+rand(-r*1.3,r*1.3), y:gy+rand(-8,8), z:gz+rand(-r*0.8,r*0.8),
+        sx:r, sy:r*0.38, sz:r
+      });
+    }
+  }
+  const mesh=buildInstancedMesh(geo,cloudMat,instances,{castShadow:false,frustumCulled:false});
+  mesh.renderOrder=-1;
+  cloudMeshRef=mesh;
+  cloudGroup.add(mesh);
+})();
+scene.add(cloudGroup);
+
+// ---- distant birds: one instanced draw call, pure geometry ----
+const birdGeo=new THREE.BufferGeometry();
+birdGeo.setAttribute('position',new THREE.Float32BufferAttribute([
+  0,0,0, -0.8,0.12,0.35, 0,0,0.18,
+  0,0,0, 0,0,0.18, 0.8,0.12,0.35
+],3));
+birdGeo.computeVertexNormals();
+const birdMesh=new THREE.InstancedMesh(birdGeo,new THREE.MeshBasicMaterial({color:0x222a24,side:THREE.DoubleSide}),22);
+birdMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+birdMesh.frustumCulled=false;
+scene.add(birdMesh);
+const BIRDS=[];
+for(let i=0;i<22;i++) BIRDS.push({a:rand(0,6.28),r:rand(45,180),h:rand(45,110),sp:rand(0.018,0.05),flap:rand(0,6.28),s:rand(1.2,2.3)});
+const _birdM=new THREE.Matrix4(),_birdQ=new THREE.Quaternion(),_birdP=new THREE.Vector3(),_birdS=new THREE.Vector3();
+function updateBirds(dt){
+  for(let i=0;i<BIRDS.length;i++){
+    const b=BIRDS[i]; b.a+=b.sp*dt;
+    const x=player.pos.x+Math.cos(b.a)*b.r;
+    const z=player.pos.z+Math.sin(b.a)*b.r;
+    const y=player.pos.y+b.h+Math.sin(performance.now()*0.001*1.3+b.flap)*4;
+    _birdP.set(x,y,z);
+    _birdQ.setFromEuler(new THREE.Euler(0,-b.a+Math.PI/2,Math.sin(performance.now()*0.006+b.flap)*0.25));
+    const flap=0.7+Math.abs(Math.sin(performance.now()*0.007+b.flap))*0.7;
+    _birdS.set(b.s,flap*b.s,b.s);
+    _birdM.compose(_birdP,_birdQ,_birdS);
+    birdMesh.setMatrixAt(i,_birdM);
+  }
+  birdMesh.instanceMatrix.needsUpdate=true;
+}
+// ---- night fireflies ----
+const fireflyCount=140;
+const fireflyGeo=new THREE.BufferGeometry();
+const fireflyPos=new Float32Array(fireflyCount*3);
+for(let i=0;i<fireflyCount;i++){
+  fireflyPos[i*3]=rand(-24,24); fireflyPos[i*3+1]=rand(0.5,5); fireflyPos[i*3+2]=rand(-24,24);
+}
+fireflyGeo.setAttribute('position',new THREE.BufferAttribute(fireflyPos,3));
+const fireflyMat=new THREE.PointsMaterial({color:0xcaff88,size:0.14,transparent:true,opacity:0,depthWrite:false,blending:THREE.AdditiveBlending,sizeAttenuation:true});
+const fireflies=new THREE.Points(fireflyGeo,fireflyMat);
+fireflies.frustumCulled=false; scene.add(fireflies);
+const FIREFLY_SEEDS=Array.from({length:fireflyCount},()=>({ox:rand(-24,24),oz:rand(-24,24),y:rand(0.5,5),ph:rand(0,6.28),sp:rand(0.3,1.0)}));
+function updateFireflies(dt,now){
+  if(!fireflyMat.map){ fireflyMat.map=runeGlowTex(); fireflyMat.alphaTest=0.01; fireflyMat.needsUpdate=true; }
+  const night=timeOfDay>0.80||timeOfDay<0.20;
+  const target=night?0.85:0;
+  fireflyMat.opacity+=(target-fireflyMat.opacity)*Math.min(1,dt*1.5);
+  if(fireflyMat.opacity<0.01){ fireflies.visible=false; return; }
+  fireflies.visible=true;
+  const p=fireflyGeo.attributes.position.array;
+  for(let i=0;i<fireflyCount;i++){
+    const s=FIREFLY_SEEDS[i];
+    p[i*3]=player.pos.x+s.ox+Math.sin(now*s.sp+s.ph)*2.2;
+    p[i*3+1]=terrainHeight(player.pos.x+s.ox,player.pos.z+s.oz)+s.y+Math.sin(now*1.7+s.ph)*0.5;
+    p[i*3+2]=player.pos.z+s.oz+Math.cos(now*s.sp*0.8+s.ph)*2.2;
+  }
+  fireflyGeo.attributes.position.needsUpdate=true;
+}
+
+// ============================================================
+// 玩家
+// ============================================================
+const player={
+  group:new THREE.Group(), pos:new THREE.Vector3(0,0,0), vel:new THREE.Vector3(),
+  impulse:new THREE.Vector3(),
+  yaw:0, hp:3, maxHp:3, stamina:1.0, maxStamina:1.0,
+  onGround:true, swimming:false, climbing:false, gliding:false,
+  climbingObj:null, climbJumpCD:0, surfing:0,
+  shieldUp:false, aiming:false,
+  attackCombo:0, attackTimer:0, attackDur:0.36,
+  rolling:0, state:'idle', invuln:0, parts:{},
+  lastFootstep:0, arrowCD:0,
+  cold:0, heat:0, wet:0,
+  atkBuff:0, defBuff:0, speedBuff:0, stealthBuff:0,
+  buffLevels:{atk:0,def:0,spd:0},
+  korokSeeds:0, trialPass:0,
+  moveAccel:0,
+  animPhase:0,
+  hurtShake:0,
+  spinAttack:0,
+  // v7：骑马 / 精力 / 服装 / 落地
+  riding:false, horse:null, mountedT:0, exhausted:0, landT:0, wasAir:false,
+  armorDef:0, armorEffect:'', armorTint:0, envTick:0, korokSight:1,
+  slopeX:0, slopeZ:0, camDistCur:9,
+  dodgeT:0, flurryT:0, bulletTime:false, darukT:0, darukCharges:0, shieldRaiseT:0, galeT:0,
+};
+let hasMasterSword=false;
+let currentWeapon=null, currentShield=null, currentBow=null;
+let currentArmor=null;
+const championSkills=[];
+const horses=[];
+let activeHorse=null, lastHorse=null;
+
+const WEAPON_DEFS=[
+  {id:'travelers_sword',name:'旅人剑',type:'sword',atk:14,dur:20,desc:'旅行者常用的单手剑。'},
+  {id:'soldiers_sword',name:'士兵之剑',type:'sword',atk:30,dur:25,desc:'海拉鲁士兵的制式单手剑。'},
+  {id:'knight_sword',name:'骑士之剑',type:'sword',atk:52,dur:27,desc:'骑士团配发的单手剑。'},
+  {id:'royal_sword',name:'王族之剑',type:'sword',atk:76,dur:36,desc:'王族流传的华丽单手剑。'},
+  {id:'flame_sword',name:'火焰剑',type:'sword',atk:50,dur:30,elem:'fire',desc:'熔岩锻造的魔法剑。'},
+  {id:'frost_sword',name:'冰雪剑',type:'sword',atk:46,dur:30,elem:'ice',desc:'极寒灵峰锻造的魔法剑。'},
+  {id:'thunder_sword',name:'雷电剑',type:'sword',atk:48,dur:36,elem:'thunder',desc:'被闪电长期照射锻造的魔法剑。'},
+  {id:'master_sword',name:'大师之剑',type:'sword',atk:68,dur:Infinity,elem:'light',desc:'驱魔之剑。'},
+  {id:'royal_guard_claymore',name:'近卫双手剑',type:'greatsword',atk:130,dur:15,desc:'攻击极高，耐久极低。'},
+  {id:'savage_lynel_claymore',name:'兽神大剑',type:'greatsword',atk:140,dur:35,desc:'莱尼尔的巨大骨剑。'},
+  {id:'lightscale_trident',name:'光鳞之枪',type:'spear',atk:48,dur:70,desc:'卓拉族英杰武器。'},
+  {id:'tree_branch',name:'树枝',type:'sword',atk:2,dur:5,desc:'路边捡到的树枝。聊胜于无。'},
+  {id:'boko_club',name:'波克棒',type:'sword',atk:12,dur:14,desc:'波克布林使用的粗糙木棒。'},
+  {id:'spiked_boko_club',name:'尖刺波克棒',type:'sword',atk:22,dur:18,desc:'钉满尖刺的波克棒。'},
+  {id:'dragonbone_boko_club',name:'龙骨波克棒',type:'sword',atk:38,dur:24,desc:'以龙骨强化的波克棒。'},
+  {id:'lizal_boomerang',name:'蜥蜴回旋镖',type:'sword',atk:24,dur:20,desc:'蜥蜴战士使用的锋利回旋镖。'},
+  {id:'guardian_sword',name:'守护者之剑',type:'sword',atk:40,dur:26,elem:'light',desc:'用古代守护者零件打造的剑。'},
+  {id:'ancient_short_sword',name:'古代兵装·短剑',type:'sword',atk:40,dur:54,elem:'light',desc:'希卡古代技术制造的小型剑。'},
+  {id:'scimitar_seven',name:'七宝弯刀',type:'sword',atk:32,dur:60,desc:'格鲁德英杰乌尔波扎赠予的弯刀。'},
+  {id:'lynel_sword',name:'莱尼尔剑',type:'sword',atk:58,dur:26,desc:'莱尼尔使用的锯齿长剑。'},
+  {id:'savage_lynel_sword',name:'兽神剑',type:'sword',atk:82,dur:30,desc:'莱尼尔首领的锋锐长剑。'},
+  {id:'royal_guard_sword',name:'近卫兵之剑',type:'sword',atk:92,dur:14,desc:'王族近卫的仪式用剑，锋利但脆弱。'},
+  {id:'great_flameblade',name:'火焰大剑',type:'greatsword',atk:62,dur:30,elem:'fire',desc:'燃烧着不灭火焰的双手剑。'},
+  {id:'great_frostblade',name:'冰雪大剑',type:'greatsword',atk:58,dur:30,elem:'ice',desc:'挥动时带起冰霜风暴。'},
+  {id:'great_thunderblade',name:'雷电大剑',type:'greatsword',atk:60,dur:32,elem:'thunder',desc:'剑身缠绕着雷电。'},
+  {id:'stone_smasher',name:'碎岩剑',type:'greatsword',atk:84,dur:30,desc:'鼓隆族用岩石打造的巨剑。'},
+  {id:'boulder_breaker',name:'碎岩巨剑',type:'greatsword',atk:96,dur:36,desc:'达尔克尔引以为傲的英杰武器。'},
+  {id:'savage_lynel_crusher',name:'兽神大锤',type:'greatsword',atk:108,dur:32,desc:'兽神莱尼尔的巨大骨锤。'},
+  {id:'ancient_bladesaw',name:'古代兵装·大剑',type:'greatsword',atk:56,dur:60,elem:'light',desc:'发出蓝色切割光束的古代大剑。'},
+  {id:'travelers_spear',name:'旅人枪',type:'spear',atk:16,dur:26,desc:'旅行者常用的长枪。'},
+  {id:'soldiers_spear',name:'士兵长枪',type:'spear',atk:24,dur:30,desc:'海拉鲁士兵的制式长枪。'},
+  {id:'knights_halberd',name:'骑士戟',type:'spear',atk:38,dur:34,desc:'骑士团使用的长柄武器。'},
+  {id:'royal_halberd',name:'王族戟',type:'spear',atk:52,dur:40,desc:'王族流传的华丽长戟。'},
+  {id:'ancient_spear',name:'古代兵装·枪',type:'spear',atk:46,dur:58,elem:'light',desc:'以古代技术锻造的光束长枪。'},
+  {id:'ceremonial_trident',name:'祭祀之枪',type:'spear',atk:22,dur:32,desc:'卓拉族仪式中使用的银枪。'},
+  {id:'boko_spear',name:'波克枪',type:'spear',atk:14,dur:22,desc:'波克布林削尖的长木枪。'},
+];
+const SHIELD_DEFS=[
+  {id:'pot_lid',name:'锅盖',def:1,dur:10,desc:'锅盖。防御力聊胜于无。'},
+  {id:'wooden_shield',name:'木盾',def:2,dur:12,desc:'简单的木盾。'},
+  {id:'travelers_shield',name:'旅人盾',def:4,dur:14,desc:'旅行者常用的轻便木盾。'},
+  {id:'soldiers_shield',name:'士兵盾',def:16,dur:18,desc:'士兵配发的金属盾。'},
+  {id:'knight_shield',name:'骑士盾',def:40,dur:23,desc:'骑士团制式盾牌。'},
+  {id:'royal_shield',name:'王族盾',def:55,dur:29,desc:'王族流传的华丽盾牌。'},
+  {id:'ancient_shield',name:'古代兵装·盾',def:70,dur:32,desc:'能自动盾反守护者激光。'},
+  {id:'hylian_shield',name:'海利亚盾',def:90,dur:800,desc:'传说中的最强盾牌。'},
+  {id:'mighty_lynel_shield',name:'兽王盾',def:62,dur:30,desc:'莱尼尔首领的强力盾牌。'},
+  {id:'boko_shield',name:'波克盾',def:6,dur:10,desc:'波克布林用木板钉成的盾。'},
+  {id:'spiked_boko_shield',name:'尖刺波克盾',def:14,dur:14,desc:'带尖刺的波克盾。'},
+  {id:'dragonbone_boko_shield',name:'龙骨波克盾',def:24,dur:18,desc:'以龙骨强化的波克盾。'},
+  {id:'royal_guard_shield',name:'近卫兵盾',def:70,dur:14,desc:'王族近卫的礼装盾。'},
+  {id:'guardian_shield',name:'守护者之盾',def:40,dur:30,desc:'古代守护者的装甲改造而成。'},
+  {id:'radiant_shield',name:'光鳞盾',def:36,dur:32,desc:'卓拉族的鳞片盾，能在水中反射微光。'},
+  {id:'kite_shield',name:'风筝盾',def:12,dur:16,desc:'画着海利亚纹章的轻盾。'},
+];
+const BOW_DEFS=[
+  {id:'travelers_bow',name:'旅人之弓',atk:16,dur:22,desc:'旅行者常用的弓。'},
+  {id:'knight_bow',name:'骑士之弓',atk:42,dur:48,desc:'骑士团制式弓。'},
+  {id:'ancient_bow',name:'古代兵装·弓',atk:70,dur:120,desc:'发射古代箭。'},
+  {id:'savage_lynel_bow',name:'兽神弓',atk:58,dur:45,desc:'一次射出3支箭。'},
+  {id:'soldiers_bow',name:'士兵之弓',atk:14,dur:36,desc:'士兵配发的标准弓。'},
+  {id:'royal_bow',name:'王族之弓',atk:38,dur:50,desc:'王族工匠打造的长弓。'},
+  {id:'royal_guard_bow',name:'近卫兵之弓',atk:50,dur:20,desc:'近卫兵的快速连射弓。'},
+  {id:'forest_dweller_bow',name:'森林猎手弓',atk:24,dur:38,desc:'费罗尼猎手使用的弓。'},
+  {id:'duplex_bow',name:'二连弓',atk:32,dur:40,desc:'依盖队仿制的二连发弓。'},
+  {id:'golden_bow',name:'黄金弓',atk:34,dur:38,desc:'格鲁德贵族使用的黄金弓。'},
+  {id:'great_eagle_bow',name:'大鹫弓',atk:44,dur:42,desc:'利特族英杰力巴尔的爱弓。'},
+];
+const ARROW_TYPES=[
+  {id:'normal',name:'普通箭',color:0xc8b080,elem:null,mult:1,inf:true},
+  {id:'fire',name:'火箭',color:0xff7722,elem:'fire',mult:1.15},
+  {id:'ice',name:'冰箭',color:0x66ccff,elem:'ice',mult:1.15},
+  {id:'bomb',name:'炸弹箭',color:0xff4444,elem:'fire',mult:0.85,bomb:true},
+  {id:'ancient',name:'古代之箭',color:0x66eeff,elem:'light',mult:2.4,ancient:true},
+];
+const arrowInventory={normal:Infinity,fire:24,ice:24,bomb:16,ancient:10};
+let currentArrow=0;
+function getArrowDef(){ return ARROW_TYPES[currentArrow]||ARROW_TYPES[0]; }
+function cycleArrow(){
+  for(let i=1;i<=ARROW_TYPES.length;i++){
+    const idx=(currentArrow+i)%ARROW_TYPES.length;
+    const t=ARROW_TYPES[idx];
+    if(t.inf||(arrowInventory[t.id]||0)>0){ currentArrow=idx; updateArrowHUD(); toast('箭矢 · '+t.name); SFX.dialog&&SFX.dialog(); return; }
+  }
+  toast('没有可用的特殊箭矢');
+}
+function updateArrowHUD(){
+  const t=getArrowDef();
+  const el=$('arrowHud'); if(!el) return;
+  const count=t.inf?'∞':(arrowInventory[t.id]||0);
+  el.innerHTML=`<span class="ah-icon" style="color:#${new THREE.Color(t.color).getHexString()}">➶</span><span>${t.name}</span><span class="ah-count">×${count}</span><span class="ah-key">X</span>`;
+}
+const MATERIAL_DEFS=[
+  // fruits & mushrooms
+  {id:'apple',name:'苹果',eff:'hp',val:1,dur:30,desc:'海拉鲁最常见的果实。生吃或烤熟都很美味。'},
+  {id:'big_apple',name:'大个苹果',eff:'hp',val:2,dur:30,desc:'比普通苹果大一圈，汁水也更充足。'},
+  {id:'hearty_radish',name:'生命大萝卜',eff:'heart',val:4,dur:30,desc:'生命力旺盛的萝卜，红色的根茎里充满了能量。'},
+  {id:'hearty_durian',name:'生命榴莲',eff:'heart',val:4,dur:30,desc:'费罗尼地区的果实，气味强烈但能补充大量生命。'},
+  {id:'mighty_bananas',name:'大剑香蕉',eff:'atk',val:2,dur:50,desc:'依盖队最喜欢的香蕉。能暂时增强攻击力。'},
+  {id:'pumpkin',name:'铠甲南瓜',eff:'def',val:2,dur:50,desc:'坚硬的南瓜，烹饪后能暂时增强防御。'},
+  {id:'carrot',name:'胡萝卜',eff:'hp',val:1,dur:30,desc:'脆甜的根茎作物。'},
+  {id:'endura_carrot',name:'大个胡萝卜',eff:'stamina',val:1,dur:30,desc:'恢复精力的稀有作物。'},
+  {id:'wildberry',name:'草莓',eff:'hp',val:1,dur:30,desc:'生长在草原上的小小红色果实。'},
+  {id:'hydromelon',name:'冰冷蜜瓜',eff:'heat',val:1,dur:150,desc:'格鲁德沙漠的水果，能抵御炎热。'},
+  {id:'voltfruit',name:'酥麻水果',eff:'shock',val:1,dur:150,desc:'生长在沙漠的果实，能抵御雷电。'},
+  {id:'spicy_pepper',name:'辣椒',eff:'cold',val:1,dur:150,desc:'吃下后会从体内涌出暖意。'},
+  {id:'sunshroom',name:'暖暖蘑菇',eff:'cold',val:1,dur:150,desc:'蘑菇伞盖呈红色，能抵御寒冷。'},
+  {id:'chillshroom',name:'冰冷蘑菇',eff:'heat',val:1,dur:150,desc:'伞盖冰凉的蘑菇，能抵御炎热。'},
+  {id:'zapshroom',name:'酥麻蘑菇',eff:'shock',val:1,dur:150,desc:'能暂时提高雷电抗性的蘑菇。'},
+  {id:'rushroom',name:'速速蘑菇',eff:'spd',val:2,dur:60,desc:'细长的蘑菇，能暂时提高移动速度。'},
+  {id:'stamella_shroom',name:'精力蘑菇',eff:'stamina',val:1,dur:30,desc:'能恢复精力的蘑菇。'},
+  {id:'armor_shroom',name:'铠甲蘑菇',eff:'def',val:2,dur:50,desc:'伞盖坚硬如甲，能增强防御。'},
+  {id:'hearty_truffle',name:'生命松露',eff:'heart',val:4,dur:30,desc:'埋在树根旁的珍稀松露。'},
+  // fish & meat
+  {id:'hyrule_bass',name:'海拉鲁鲈鱼',eff:'hp',val:1,dur:30,desc:'河川与湖泊中常见的鱼。'},
+  {id:'hearty_bass',name:'生命鲈鱼',eff:'heart',val:3,dur:30,desc:'泛着红光的珍稀鲈鱼。'},
+  {id:'staminoka_bass',name:'精力鲈鱼',eff:'stamina',val:1,dur:30,desc:'能在水中长时间游动的鱼。'},
+  {id:'chillfin_trout',name:'冰冷鳟鱼',eff:'heat',val:1,dur:150,desc:'身体冰凉的鳟鱼。'},
+  {id:'warmfin_trout',name:'暖暖鳟鱼',eff:'cold',val:1,dur:150,desc:'生活在温暖水域的鳟鱼。'},
+  {id:'voltfin_trout',name:'酥麻鳟鱼',eff:'shock',val:1,dur:150,desc:'鳞片带有微弱电流的鳟鱼。'},
+  {id:'salmon',name:'鲑鱼',eff:'hp',val:2,dur:30,desc:'肉质厚实的河鱼。'},
+  {id:'hearty_salmon',name:'生命鲑鱼',eff:'heart',val:3,dur:30,desc:'富含生命力的鲑鱼。'},
+  {id:'raw_meat',name:'兽肉',eff:'hp',val:1,dur:30,desc:'猎人带回的新鲜兽肉。'},
+  {id:'prime_meat',name:'高级兽肉',eff:'hp',val:2,dur:30,desc:'品质上乘的兽肉。'},
+  {id:'gourmet_meat',name:'顶级兽肉',eff:'hp',val:3,dur:30,desc:'极为稀有的顶级兽肉。'},
+  {id:'raw_bird',name:'禽肉',eff:'hp',val:1,dur:30,desc:'禽类的肉，适合烤制。'},
+  {id:'prime_bird',name:'高级禽肉',eff:'hp',val:2,dur:30,desc:'肥美的禽肉。'},
+  {id:'gourmet_bird',name:'顶级禽肉',eff:'hp',val:3,dur:30,desc:'只在高空鸟类身上取得的顶级禽肉。'},
+  // herbs & seasoning
+  {id:'silent_princess',name:'静谧公主',eff:'stealth',val:3,dur:120,desc:'塞爾達公主最喜爱的花，能提高潜行能力。'},
+  {id:'sneaky_thistle',name:'潜行草',eff:'stealth',val:2,dur:120,desc:'散发淡淡香气的草，可抑制气息。'},
+  {id:'warm_safflina',name:'暖暖草果',eff:'cold',val:1,dur:150,desc:'生长在寒冷地带的红色草果。'},
+  {id:'cool_safflina',name:'冰冷草',eff:'heat',val:1,dur:150,desc:'生长在炎热地带的蓝色草。'},
+  {id:'electric_safflina',name:'酥麻草',eff:'shock',val:1,dur:150,desc:'带电的草，能抵御雷电。'},
+  {id:'hylian_rice',name:'海拉鲁米',eff:null,dur:20,desc:'海拉鲁各地都能买到的主食。'},
+  {id:'tabeton_wheat',name:'塔邦挞小麦',eff:null,dur:20,desc:'制作面包与面食的原料。'},
+  {id:'cane_sugar',name:'蔗糖',eff:null,dur:20,desc:'带来甜味的调味料。'},
+  {id:'goat_butter',name:'山羊黄油',eff:null,dur:20,desc:'浓郁的乳制调味品。'},
+  {id:'fresh_milk',name:'新鲜牛奶',eff:null,dur:20,desc:'新鲜的牛奶。'},
+  {id:'bird_egg',name:'禽蛋',eff:null,dur:20,desc:'常见的蛋。'},
+  {id:'rock_salt',name:'岩盐',eff:null,dur:20,desc:'从岩石中开采的盐。'},
+  // critters
+  {id:'hearty_lizard',name:'生命蜥蜴',eff:'heart',val:2,dur:30,desc:'体内蕴含生命力的蜥蜴。'},
+  {id:'hightail_lizard',name:'速速蜥蜴',eff:'spd',val:1,dur:60,desc:'跑得飞快的蜥蜴。'},
+  {id:'fireproof_lizard',name:'耐火蜥蜴',eff:'fire',val:1,dur:150,desc:'火山地带的蜥蜴，可抵御灼热。'},
+  {id:'restless_cricket',name:'精力蟋蟀',eff:'stamina',val:1,dur:30,desc:'会不停鸣叫的蟋蟀。'},
+  {id:'summerwing_butterfly',name:'夏日蝶',eff:'hp',val:1,dur:30,desc:'在夏日草原飞舞的蝴蝶。'},
+  {id:'winterwing_butterfly',name:'冬日蝶',eff:'cold',val:1,dur:120,desc:'寒冷地区可见的蝴蝶。'},
+  {id:'thunderwing_butterfly',name:'雷鸣蝶',eff:'shock',val:1,dur:120,desc:'雷雨前后出现的蝴蝶。'},
+  {id:'sunset_firefly',name:'落日萤火虫',eff:'stealth',val:1,dur:90,desc:'黄昏时发光的萤火虫。'},
+  // monster parts
+  {id:'bokoblin_horn',name:'波克布林角',eff:null,monster:true,desc:'波克布林头上的角。'},
+  {id:'blue_bokoblin_horn',name:'蓝色波克布林角',eff:null,monster:true,desc:'更强壮波克布林的角。'},
+  {id:'lizalfos_horn',name:'蜥蜴战士角',eff:null,monster:true,desc:'蜥蜴战士掉落的角。'},
+  {id:'blue_lizalfos_horn',name:'蓝色蜥蜴战士角',eff:null,monster:true,desc:'蓝色蜥蜴战士的角。'},
+  {id:'lynel_horn',name:'莱尼尔角',eff:null,monster:true,desc:'莱尼尔的巨大角，蕴含强大力量。'},
+  {id:'hinox_tooth',name:'西诺克斯的牙',eff:null,monster:true,desc:'独眼巨人的牙齿。'},
+  {id:'molduga_fin',name:'莫尔德拉吉克的鳍',eff:null,monster:true,desc:'沙海巨兽的背鳍。'},
+  {id:'keese_wing',name:'蝙蝠翅膀',eff:null,monster:true,desc:'轻薄而坚韧的翼膜。'},
+  {id:'chuchu_jelly',name:'丘丘胶',eff:null,monster:true,desc:'丘丘体内的胶状物。'},
+  {id:'wizzrobe_rod',name:'维兹罗布的法杖',eff:null,monster:true,desc:'残留元素力量的短杖。'},
+  {id:'guardian_gear',name:'古代齿轮',eff:null,monster:true,desc:'从守护者残骸上拆下的齿轮。'},
+  {id:'ancient_core',name:'古代核心',eff:null,monster:true,desc:'古代机械的动力核心。'},
+  {id:'ancient_shaft',name:'古代传动轴',eff:null,monster:true,desc:'古代兵器的传动部件。'},
+  {id:'ancient_spring',name:'古代弹簧',eff:null,monster:true,desc:'古代兵器的弹性部件。'},
+  {id:'giant_ancient_core',name:'巨大古代核心',eff:null,monster:true,desc:'大型古代机械的动力核心。'},
+  // gems & rare
+  {id:'amber',name:'琥珀',eff:null,desc:'凝固的远古树脂，内部有时封着昆虫。'},
+  {id:'opal',name:'蛋白石',eff:null,desc:'泛着七彩光泽的宝石。'},
+  {id:'luminous_stone',name:'夜光石',eff:null,desc:'在黑暗中发出淡蓝光芒的矿石。'},
+  {id:'ruby',name:'红宝石',eff:null,desc:'蕴含热量的红色宝石。'},
+  {id:'sapphire',name:'蓝宝石',eff:null,desc:'蕴含寒气的蓝色宝石。'},
+  {id:'topaz',name:'黄玉',eff:null,desc:'蕴含雷电力量的黄色宝石。'},
+  {id:'diamond',name:'钻石',eff:null,desc:'坚硬而璀璨的稀有宝石。'},
+  {id:'star_fragment',name:'星星碎片',eff:null,desc:'从夜空中坠落的星之碎片。'},
+  {id:'wood',name:'木材',eff:null,desc:'捆绑好的木柴，可用于生火。'},
+  {id:'flint',name:'燧石',eff:null,desc:'敲击后会产生火花。'},
+  {id:'monster_extract',name:'怪物精华',eff:'atk',val:1,dur:40,monster:true,desc:'从魔物身上提取的精华，可用于料理。'},
+];
+
+// ============================================================
+// ★ 服装 / 套装（全部服装）
+// ============================================================
+const ARMOR_SETS=[
+  {id:'old',name:'旧衣服',def:1,effect:'无特殊效果',desc:'从沉睡中醒来时穿着的旧衣。轻便，但几乎没有防御力。',
+   pieces:['旧头巾','旧上衣','旧裤子'],colors:{main:0x4f7a52,secondary:0x6a5a40,accent:0x9a8a5a,metal:0x8a8a82,leather:0x4a3a28,fur:0x8a7a5a,glow:0x000000},
+   look:{head:'none',chest:false,shoulders:false,skirt:false,cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'short'},bonus:{}},
+  {id:'hylian',name:'海利亚套装',def:5,effect:'均衡的旅行装束',desc:'海拉鲁旅人最常见的装束。绿色外衣与结实的皮靴，适合长途跋涉。',
+   pieces:['海利亚兜帽','海利亚上衣','海利亚裤子'],colors:{main:0x2f7d5a,secondary:0x5a5540,accent:0xc9a84c,metal:0xb8b8c0,leather:0x3a3026,fur:0x8a7a5a,glow:0x000000},
+   look:{head:'cap',chest:false,shoulders:false,skirt:false,cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'long'},bonus:{}},
+  {id:'soldier',name:'士兵盔甲',def:12,effect:'防御提升 · 金属护甲',desc:'海拉鲁士兵的制式盔甲。厚重，但能抵挡大部分刀剑。',
+   pieces:['士兵头盔','士兵胸甲','士兵护腿'],colors:{main:0x35507a,secondary:0x27364e,accent:0xb8c8d8,metal:0x9aa8b8,leather:0x3a2a1a,fur:0x6a7a8a,glow:0x000000},
+   look:{head:'helm',chest:'plate',shoulders:'plate',skirt:'armor',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{}},
+  {id:'royal_guard',name:'近卫兵套装',def:18,effect:'攻击 +10% · 王族威严',desc:'王族近卫的礼装。深蓝与金线交织，披风在风中猎猎作响。',
+   pieces:['近卫头盔','近卫胸甲','近卫护腿'],colors:{main:0x1e2c52,secondary:0x28365c,accent:0xd8b45a,metal:0xc8c8d0,leather:0x2a1a10,fur:0xd8d8e0,glow:0x000000},
+   look:{head:'helm',chest:'plate',shoulders:'plate',skirt:'armor',cape:true,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{atk:1.1}},
+  {id:'champion',name:'英杰服',def:10,effect:'对守护者伤害 +25%',desc:'塞尔达公主为英杰林克缝制的蓝色上衣。衣摆绣着四神兽的纹章。',
+   pieces:['英杰头巾','英杰上衣','英杰裤子'],colors:{main:0x2a5a9a,secondary:0x2a3a4a,accent:0xe8d8a0,metal:0xb8b8c0,leather:0x3a3026,fur:0x8a7a5a,glow:0x66ccff},
+   look:{head:'none',chest:false,shoulders:false,skirt:false,cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'long'},bonus:{guardianDmg:1.25}},
+  {id:'ancient',name:'古代兵装',def:20,effect:'守护者伤害减免 55% · 古代武器强化',desc:'希卡古代技术打造的白金装甲。齿轮与蓝色能量线在甲片间流动。',
+   pieces:['古代头盔','古代胸甲','古代护腿'],colors:{main:0xd8d8d0,secondary:0x8a8a82,accent:0x66ccff,metal:0xc8d0d8,leather:0x4a4a52,fur:0xe8e8e0,glow:0x44ccff},
+   look:{head:'ancient',chest:'plate',shoulders:'plate',skirt:'armor',cape:false,scarf:false,fur:false,runes:true,bracers:true,greaves:true,arms:'long'},bonus:{guardianResist:0.55}},
+  {id:'barbarian',name:'蛮族套装',def:9,effect:'攻击 +50%',desc:'古老蛮族的兽骨装束。放弃防御，换来压倒性的攻击力。',
+   pieces:['蛮族头骨','蛮族胸甲','蛮族护腿'],colors:{main:0x8a4a2a,secondary:0x5a3a2a,accent:0xd8b45a,metal:0x8a7a62,leather:0x3a2418,fur:0x9a7a52,glow:0x000000},
+   look:{head:'hornhelm',chest:'fur',shoulders:'fur',skirt:'fur',cape:false,scarf:false,fur:true,runes:false,bracers:true,greaves:true,arms:'short'},bonus:{atk:1.5}},
+  {id:'stealth',name:'潜行套装',def:8,effect:'潜行提升 65%',desc:'忍者一族的深色装束。布料经过特殊处理，行动时几乎不会发出声响。',
+   pieces:['潜行面罩','潜行上衣','潜行裤子'],colors:{main:0x2a2a32,secondary:0x1a1a20,accent:0x8a3a6a,metal:0x6a6a72,leather:0x1a1414,fur:0x3a2a32,glow:0x000000},
+   look:{head:'mask',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:true,fur:false,runes:false,bracers:true,greaves:false,arms:'long'},bonus:{stealth:0.65}},
+  {id:'snowquill',name:'雪地套装',def:10,effect:'耐寒 · 雪原行动',desc:'海布拉猎人的厚实羽衣。蓬松的羽领能挡住最刺骨的寒风。',
+   pieces:['雪地羽帽','雪地羽衣','雪地羽裤'],colors:{main:0x9a3a3a,secondary:0x6a2a2a,accent:0xe8e0d0,metal:0xb8b8c0,leather:0x4a2a1a,fur:0xe8e0d0,glow:0x000000},
+   look:{head:'feather',chest:false,shoulders:'fur',skirt:'fur',cape:false,scarf:false,fur:true,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{cold:true}},
+  {id:'desert_voe',name:'沙漠套装',def:8,effect:'耐热 · 沙漠行动',desc:'格鲁德地区商旅的装束。轻薄的布料能反射灼热的日光。',
+   pieces:['沙漠头巾','沙漠上衣','沙漠长裤'],colors:{main:0xd8c090,secondary:0x8a7a5a,accent:0x4aa8a0,metal:0xc8b888,leather:0x6a4a2a,fur:0xd8c8a8,glow:0x000000},
+   look:{head:'veil',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:true,fur:false,runes:false,bracers:true,greaves:false,arms:'short'},bonus:{heat:true}},
+  {id:'gerudo',name:'格鲁德套装',def:6,effect:'耐热 · 潜行 +20%',desc:'格鲁德小镇的传统服饰。金饰与薄纱在沙漠的风中轻轻摇晃。',
+   pieces:['格鲁德头饰','格鲁德上衣','格鲁德裙裤'],colors:{main:0xe8d8a8,secondary:0xc8a868,accent:0x2aa8a0,metal:0xe8c86a,leather:0x8a5a2a,fur:0xe8d8c0,glow:0x66ffee},
+   look:{head:'tiara',chest:false,shoulders:false,skirt:'long',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:false,arms:'short'},bonus:{heat:true,stealth:0.2}},
+  {id:'flamebreaker',name:'防火套装',def:14,effect:'耐火 · 火山行动',desc:'鼓隆族打造的耐火石甲。即便走进熔岩旁的灼热地带也能安然无恙。',
+   pieces:['防火头盔','防火胸甲','防火护腿'],colors:{main:0x8a2a1a,secondary:0x4a1a12,accent:0xe8a048,metal:0x6a6a72,leather:0x3a1a10,fur:0x8a4a2a,glow:0xff6622},
+   look:{head:'flame',chest:'plate',shoulders:'plate',skirt:'armor',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{fire:true}},
+  {id:'rubber',name:'橡胶套装',def:10,effect:'抗电 · 雷雨行动',desc:'以橡胶与绝缘布缝制的奇装。雷电会顺着衣料导入地面。',
+   pieces:['橡胶头盔','橡胶紧身衣','橡胶护腿'],colors:{main:0xd8c040,secondary:0x2a2a2a,accent:0x4aa8e8,metal:0x8a8a92,leather:0x1a1a1a,fur:0xd8d0a0,glow:0x000000},
+   look:{head:'cap',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{shock:true}},
+  {id:'climbing',name:'攀岩套装',def:9,effect:'攀爬速度 +35% · 攀爬耗力 -30%',desc:'攀岩者钟爱的轻装。指尖与鞋底都经过防滑处理，岩壁不再遥不可及。',
+   pieces:['攀岩头巾','攀岩上衣','攀岩裤子'],colors:{main:0x4a7a3a,secondary:0x6a5a3a,accent:0xd8c040,metal:0x9aa8b8,leather:0x4a3a24,fur:0x8a7a52,glow:0x000000},
+   look:{head:'bandana',chest:false,shoulders:false,skirt:false,cape:false,scarf:true,fur:false,runes:false,bracers:true,greaves:true,arms:'short'},bonus:{climb:1.35,climbStam:0.7}},
+  {id:'zora',name:'卓拉套装',def:11,effect:'游泳速度 +40% · 游泳耗力 -30%',desc:'卓拉族以鱼鳞打造的礼装。入水时，衣甲会顺着水流贴合身体。',
+   pieces:['卓拉头冠','卓拉鳞甲','卓拉护腿'],colors:{main:0x2a8ac8,secondary:0x1a5a8a,accent:0x88e0ff,metal:0xc8e8ff,leather:0x1a3a5a,fur:0x88c8e8,glow:0x66ddff},
+   look:{head:'tiara',chest:'scale',shoulders:'scale',skirt:'armor',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{swim:1.4,swimStam:0.7}},
+  {id:'glide',name:'滑翔套装',def:7,effect:'滑翔耗力 -55%',desc:'为滑翔者设计的红色装束。兜帽边缘收窄，风阻极小。',
+   pieces:['滑翔兜帽','滑翔上衣','滑翔裤子'],colors:{main:0xb83a32,secondary:0x6a2420,accent:0xe8d8b0,metal:0xb8b8c0,leather:0x3a2418,fur:0xe8e0d0,glow:0x000000},
+   look:{head:'goggles',chest:false,shoulders:false,skirt:false,cape:false,scarf:true,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{glide:0.45}},
+  {id:'phantom',name:'幻影套装',def:16,effect:'攻击 +30% · 潜行 +30%',desc:'散发着紫黑雾气的幻影盔甲。穿上它的人会听见来自另一个世界的低语。',
+   pieces:['幻影头盔','幻影胸甲','幻影护腿'],colors:{main:0x2a1a32,secondary:0x1a1020,accent:0x8a3aa8,metal:0x5a4a62,leather:0x1a1018,fur:0x3a2a42,glow:0xaa44ff},
+   look:{head:'hornhelm',chest:'plate',shoulders:'plate',skirt:'armor',cape:true,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{atk:1.3,stealth:0.3}},
+  {id:'deity',name:'鬼神套装',def:18,effect:'攻击 +50% · 鬼神之力',desc:'传说中鬼神所穿的战甲。白色的甲片与红色纹路，仿佛仍残留着神明的怒火。',
+   pieces:['鬼神面具','鬼神胸甲','鬼神护腿'],colors:{main:0xe8e8e8,secondary:0x9a9aa8,accent:0xb83030,metal:0xd8d8e0,leather:0x4a3a3a,fur:0xe8e8e8,glow:0xff4444},
+   look:{head:'deity',chest:'plate',shoulders:'plate',skirt:'armor',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{atk:1.5}},
+  {id:'dark',name:'黑暗套装',def:14,effect:'攻击 +20%',desc:'漆黑如夜的装束。布料上没有任何反光，像是把光都吞了进去。',
+   pieces:['黑暗头巾','黑暗上衣','黑暗裤子'],colors:{main:0x1a1a1e,secondary:0x0e0e12,accent:0x5a5a6a,metal:0x3a3a40,leather:0x0a0a0c,fur:0x2a2a30,glow:0x000000},
+   look:{head:'cap',chest:'plate',shoulders:'plate',skirt:'cloth',cape:true,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{atk:1.2}},
+  {id:'tingle',name:'汀空套装',def:4,effect:'潜行 +20% · 奇装异服',desc:'一位自称妖精商人的男人留下的绿色紧身衣。穿上它总觉得有人在叫你“汀空”。',
+   pieces:['汀空帽','汀空紧身衣','汀空裤子'],colors:{main:0x2a9a3a,secondary:0x1a6a2a,accent:0xe83a3a,metal:0xb8b8c0,leather:0x3a2a1a,fur:0xe8e0d0,glow:0x000000},
+   look:{head:'tingle',chest:false,shoulders:false,skirt:false,cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:false,arms:'long'},bonus:{stealth:0.2}},
+  {id:'korok',name:'呀哈哈套装',def:3,effect:'更容易发现克洛格',desc:'用树叶与藤蔓编成的装束。戴上叶子面具，森林里的呀哈哈似乎不再躲藏。',
+   pieces:['呀哈哈面具','呀哈哈树叶衣','呀哈哈藤裤'],colors:{main:0x5a8a2a,secondary:0x3a5a1a,accent:0xc8d840,metal:0x8a7a42,leather:0x3a2a14,fur:0x7a9a3a,glow:0x88ff44},
+   look:{head:'mask',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'short'},bonus:{korok:3,stealth:0.2}},
+  {id:'thunder',name:'雷光头盔',def:12,effect:'完全免疫雷电 · 抗电',desc:'格鲁德族世代相传的宝盔。戴上它，天雷也会绕道而行。',
+   pieces:['雷光头盔','雷光胸甲','雷光护腿'],colors:{main:0x8a7a3a,secondary:0x4a3a1a,accent:0xffd84a,metal:0xd8b85a,leather:0x3a2a14,fur:0xd8c890,glow:0xffdd44},
+   look:{head:'thunder',chest:'plate',shoulders:'plate',skirt:'armor',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:true,arms:'long'},bonus:{shock:true,lightning:true}},
+  {id:'hero_time',name:'时之勇者套装',def:10,effect:'攻击 +10% · 时之勇者',desc:'跨越时光的勇者装束。绿色衣摆上还沾着海拉鲁原野的草香。',
+   pieces:['时之勇者帽','时之勇者衣','时之勇者裤'],colors:{main:0x2a8a4a,secondary:0x6a5a3a,accent:0xd8c890,metal:0xb8b8c0,leather:0x4a3a24,fur:0xe8e0d0,glow:0x000000},
+   look:{head:'cap',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:false,arms:'long'},bonus:{atk:1.1}},
+  {id:'hero_wind',name:'风之勇者套装',def:10,effect:'游泳 +20% · 风之勇者',desc:'乘着海风航行的勇者装束。衣料轻盈，仿佛随时会被风带走。',
+   pieces:['风之勇者帽','风之勇者衣','风之勇者裤'],colors:{main:0x3a9a6a,secondary:0x2a5a4a,accent:0xe8d8a0,metal:0xb8c8d0,leather:0x3a3020,fur:0xe8e8d0,glow:0x000000},
+   look:{head:'cap',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:false,arms:'long'},bonus:{swim:1.2}},
+  {id:'hero_twilight',name:'黄昏之勇者套装',def:11,effect:'攻击 +15% · 黄昏之勇者',desc:'来自黄昏世界的勇者装束。布料上残留着 twilight 的微光。',
+   pieces:['黄昏之勇者帽','黄昏之勇者衣','黄昏之勇者裤'],colors:{main:0x3a6a3a,secondary:0x6a5a3a,accent:0xc8b060,metal:0xa8a8b0,leather:0x3a2a18,fur:0xd8d0c0,glow:0x000000},
+   look:{head:'cap',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:false,arms:'long'},bonus:{atk:1.15}},
+  {id:'hero_sky',name:'天空之勇者套装',def:10,effect:'滑翔耗力 -30% · 天空之勇者',desc:'来自天空之岛的勇者装束。衣摆上绣着云与鸟的纹样。',
+   pieces:['天空之勇者帽','天空之勇者衣','天空之勇者裤'],colors:{main:0x3a8a5a,secondary:0x5a6a4a,accent:0xe8e0c0,metal:0xc8d0d8,leather:0x4a3a24,fur:0xf0f0e8,glow:0x000000},
+   look:{head:'cap',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:false,fur:false,runes:false,bracers:true,greaves:false,arms:'long'},bonus:{glide:0.7}},
+  {id:'awakening',name:'织梦岛套装',def:6,effect:'攻击 +10% · 梦之岛',desc:'来自一座会做梦的小岛的装束。颜色鲜艳得像是童话绘本。',
+   pieces:['织梦岛帽','织梦岛衣','织梦岛裤'],colors:{main:0xc84a3a,secondary:0x3a5a8a,accent:0xe8d8a0,metal:0xb8b8c0,leather:0x4a2a1a,fur:0xe8e0d0,glow:0x000000},
+   look:{head:'cap',chest:false,shoulders:false,skirt:'cloth',cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'long'},bonus:{atk:1.1}},
+  {id:'lobster',name:'蓝色大虾衬衫',def:2,effect:'耐热 · 游泳 +10%',desc:'印着巨大蓝色龙虾的度假衬衫。海风、沙滩与冰镇果汁的味道。',
+   pieces:['草帽','蓝色大虾衬衫','沙滩短裤'],colors:{main:0x2a6ac8,secondary:0x1a4a8a,accent:0xe8e0c0,metal:0xb8b8c0,leather:0x6a4a2a,fur:0xe8d8a0,glow:0x000000},
+   look:{head:'none',chest:false,shoulders:false,skirt:false,cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'short'},bonus:{heat:true,swim:1.1}},
+  {id:'switch',name:'任天堂Switch衬衫',def:2,effect:'无特殊效果 · 纪念装',desc:'一件印着游戏机标志的红色纪念衫。穿上它，仿佛随时可以开始新的冒险。',
+   pieces:['红色鸭舌帽','Switch衬衫','休闲短裤'],colors:{main:0xc83a32,secondary:0x2a2a32,accent:0xe8e8e8,metal:0xb8b8c0,leather:0x3a3026,fur:0xe8e0d0,glow:0x000000},
+   look:{head:'cap',chest:false,shoulders:false,skirt:false,cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'short'},bonus:{}},
+  {id:'majora',name:'魔吉拉面具',def:3,effect:'潜行 +50% · 诡异气息',desc:'一张散发着不祥气息的彩色面具。戴久了，会听见面具在笑。',
+   pieces:['魔吉拉面具','旅人上衣','旅人裤子'],colors:{main:0x5a4a3a,secondary:0x3a2a1a,accent:0xc84a3a,metal:0xb8a878,leather:0x3a2418,fur:0xd8c8a0,glow:0xffaa22},
+   look:{head:'majora',chest:false,shoulders:false,skirt:false,cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'long'},bonus:{stealth:0.5}},
+  {id:'midna',name:'米多娜头盔',def:3,effect:'潜行 +30% · 影之公主',desc:'影之公主米多娜的头盔。戴上它，影子会变得更安静。',
+   pieces:['米多娜头盔','旅人上衣','旅人裤子'],colors:{main:0x3a3a4a,secondary:0x2a2a32,accent:0x66ccff,metal:0x8a8a9a,leather:0x1a1a20,fur:0x5a5a6a,glow:0x66ddff},
+   look:{head:'midna',chest:false,shoulders:false,skirt:false,cape:false,scarf:false,fur:false,runes:false,bracers:false,greaves:false,arms:'long'},bonus:{stealth:0.3}},
+];
+
+const inventory={weapons:[],shields:[],bows:[],materials:[],food:[],armors:[]};
+['travelers_sword','soldiers_sword','knight_sword','flame_sword','frost_sword','thunder_sword',
+ 'ancient_short_sword','scimitar_seven','boulder_breaker','royal_halberd','great_frostblade','lynel_sword'].forEach(id=>{
+  const w=WEAPON_DEFS.find(x=>x.id===id); if(w) inventory.weapons.push({...w,curDur:w.dur,qty:1});
+});
+['pot_lid','wooden_shield','travelers_shield','soldiers_shield','knight_shield','royal_shield','hylian_shield','guardian_shield','radiant_shield','royal_guard_shield'].forEach(id=>{
+  const s=SHIELD_DEFS.find(x=>x.id===id); if(s) inventory.shields.push({...s,curDur:s.dur,qty:1});
+});
+['travelers_bow','knight_bow','ancient_bow','royal_bow','great_eagle_bow','duplex_bow'].forEach(id=>{
+  const b=BOW_DEFS.find(x=>x.id===id); if(b) inventory.bows.push({...b,curDur:b.dur,qty:1});
+});
+MATERIAL_DEFS.forEach(m=>{ if(m.monster) return; inventory.materials.push({...m,qty:randInt(2,5)}); });
+['bokoblin_horn','blue_bokoblin_horn','lizalfos_horn','lynel_horn','guardian_gear','chuchu_jelly','keese_wing','hinox_tooth','molduga_fin','ancient_core'].forEach(id=>{
+  const m=MATERIAL_DEFS.find(x=>x.id===id); if(m) inventory.materials.push({...m,qty:randInt(1,3)});
+});
+ARMOR_SETS.forEach(a=>inventory.armors.push({...a,owned:true,kind:'armor'}));
+currentWeapon=inventory.weapons[0];
+currentShield=inventory.shields.find(s=>s.id==='travelers_shield')||inventory.shields[0];
+currentBow=inventory.bows[0];
+
+function optimizeShadowCasters(root){
+  root.traverse(o=>{
+    if(!o.isMesh||o.isInstancedMesh||!o.castShadow) return;
+    if(!o.geometry.boundingSphere){ try{ o.geometry.computeBoundingSphere(); }catch(e){ return; } }
+    const bs=o.geometry.boundingSphere; if(!bs) return;
+    const sc=Math.max(Math.abs(o.scale.x),Math.abs(o.scale.y),Math.abs(o.scale.z));
+    if(bs.radius*sc < 0.17) o.castShadow=false;
+  });
+}
+function buildPlayer(){
+  const g = player.group;
+  g.name='player';
+  g.position.copy(player.pos);
+
+  // 三层结构：group(位置/朝向) -> slope(贴合地形) -> visual(动画)
+  const slope = new THREE.Group();
+  const visual = new THREE.Group();
+  slope.add(visual); g.add(slope);
+  player.parts.slope = slope;
+  player.parts.visual = visual;
+
+  const M = {
+    skin: makeToonMaterial(0xd9b38c,{shadowColor:0x8a6a50,steps:3}),
+    hair: makeToonMaterial(0xc9a44a,{shadowColor:0x7a5a20,steps:4,rimColor:0xffdd88}),
+    main: makeToonMaterial(0x2f7d5a,{shadowColor:0x1a4a30,steps:3,rimColor:0x88ffcc}),
+    secondary: makeToonMaterial(0x5a5540,{shadowColor:0x2a2820,steps:3}),
+    accent: makeToonMaterial(0xc9a84c,{shadowColor:0x6a5a20,steps:3,rimColor:0xffe8a0}),
+    metal: makeToonMaterial(0xb8b8c0,{shadowColor:0x4a4a58,steps:4,rimColor:0xffffff,rimPower:2.0}),
+    leather: makeToonMaterial(0x3a3026,{shadowColor:0x1a1510,steps:3}),
+    fur: makeToonMaterial(0x8a7a5a,{shadowColor:0x3a3020,steps:3}),
+    glow: makeToonMaterial(0x66ccff,{shadowColor:0x1a4a6a,steps:3,rimColor:0xffffff,emissive:0x44aaff,emissiveIntensity:1.4}),
+    dark: makeToonMaterial(0x1a1a20,{shadowColor:0x050508,steps:2}),
+    eyeWhite: new THREE.MeshStandardMaterial({color:0xf8f4ec,roughness:0.45}),
+    eyeIris: new THREE.MeshStandardMaterial({color:0x2f6a9a,roughness:0.3,metalness:0.1}),
+    eyePupil: new THREE.MeshStandardMaterial({color:0x08080a,roughness:0.25}),
+    glass: new THREE.MeshStandardMaterial({color:0x88ddff,transparent:true,opacity:0.32,roughness:0.08,metalness:0.25,side:THREE.DoubleSide}),
+    shieldBody: makeToonMaterial(0x3a5a8a,{shadowColor:0x1a2a4a,steps:3,rimColor:0x88aaff}),
+    shieldRim: makeToonMaterial(0x8a8a90,{shadowColor:0x3a3a48,steps:4,rimColor:0xffffff}),
+    blade: makeToonMaterial(0xc8d0d8,{shadowColor:0x5a6270,steps:4,rimColor:0xffffff,rimPower:2.2}),
+    bladeGlow: makeToonMaterial(0xaaddff,{shadowColor:0x3a5a7a,steps:4,rimColor:0xffffff,emissive:0x66aaff,emissiveIntensity:0.9}),
+    wood: makeToonMaterial(0x6a4a2a,{shadowColor:0x2a1a0a,steps:3}),
+    string: new THREE.LineBasicMaterial({color:0xe8e0d0,transparent:true,opacity:0.8}),
+  };
+  player.mats = M;
+
+  const mesh = (geo,mat,cast=true)=>{ const m=new THREE.Mesh(geo,mat); m.castShadow=cast; return m; };
+
+  // ---------- 骨盆 / 腰带 ----------
+  const pelvis = mesh(new THREE.CylinderGeometry(0.235,0.27,0.22,9),M.secondary);
+  pelvis.position.y = 0.76; visual.add(pelvis);
+  player.parts.pelvis = pelvis;
+  const belt = mesh(new THREE.TorusGeometry(0.272,0.034,6,14),M.leather);
+  belt.rotation.x=Math.PI/2; belt.position.y=0.815; visual.add(belt);
+  const buckle = mesh(new THREE.BoxGeometry(0.09,0.075,0.035),M.accent);
+  buckle.position.set(0,0.815,0.265); visual.add(buckle);
+  const buckleDot = mesh(new THREE.SphereGeometry(0.022,6,5),M.glow,false);
+  buckleDot.position.set(0,0.815,0.288); visual.add(buckleDot);
+  const pouch = mesh(new THREE.BoxGeometry(0.12,0.13,0.08),M.leather);
+  pouch.position.set(-0.25,0.73,0.12); pouch.rotation.z=0.14; visual.add(pouch);
+  const pouchFlip = mesh(new THREE.BoxGeometry(0.12,0.04,0.085),M.accent,false);
+  pouchFlip.position.set(-0.25,0.795,0.125); pouchFlip.rotation.z=0.14; visual.add(pouchFlip);
+
+  // ---------- 躯干（脊柱 → 胸腔） ----------
+  const spine = new THREE.Group();
+  spine.position.y = 0.98; visual.add(spine);
+  player.parts.spine = spine;
+  const spineMid = new THREE.Group();
+  spineMid.position.y = 0.10; spine.add(spineMid);
+  const spineUpper = new THREE.Group();
+  spineUpper.position.y = 0.10; spineMid.add(spineUpper);
+  const chest = new THREE.Group();
+  chest.position.y = -0.20; spineUpper.add(chest);
+  player.parts.chest = chest;
+  player.parts.spineMid = spineMid; player.parts.spineUpper = spineUpper;
+
+  const torso = mesh(new THREE.CylinderGeometry(0.232,0.272,0.58,12),M.main);
+  torso.position.y = 0.04; chest.add(torso);
+  player.parts.torso = torso;
+
+  const tunicHem = mesh(new THREE.CylinderGeometry(0.268,0.295,0.20,12,1,true),M.main);
+  tunicHem.position.y = -0.285; chest.add(tunicHem);
+  player.parts.tunicHem = tunicHem;
+  const hemTrim = mesh(new THREE.TorusGeometry(0.296,0.013,4,16),M.accent,false);
+  hemTrim.rotation.x=Math.PI/2; hemTrim.position.y=-0.386; chest.add(hemTrim);
+  player.parts.hemTrim = hemTrim;
+
+  const collar = mesh(new THREE.TorusGeometry(0.146,0.034,6,14),M.main);
+  collar.rotation.x=Math.PI/2; collar.position.y=0.328; chest.add(collar);
+  const collarTrim = mesh(new THREE.TorusGeometry(0.150,0.011,4,16),M.accent,false);
+  collarTrim.rotation.x=Math.PI/2; collarTrim.position.y=0.336; chest.add(collarTrim);
+  const neck = mesh(new THREE.CylinderGeometry(0.075,0.085,0.13,8),M.skin);
+  neck.position.y=0.375; chest.add(neck);
+
+  const baldric = mesh(new THREE.BoxGeometry(0.052,0.62,0.026),M.leather,false);
+  baldric.position.set(0.02,0.04,0.252); baldric.rotation.z=0.58; chest.add(baldric);
+  const baldricBuckle = mesh(new THREE.BoxGeometry(0.07,0.05,0.035),M.accent,false);
+  baldricBuckle.position.set(-0.13,0.14,0.262); baldricBuckle.rotation.z=0.58; chest.add(baldricBuckle);
+
+  const emblem = new THREE.Group();
+  emblem.position.set(0,0.09,0.292); chest.add(emblem);
+  for(let i=0;i<3;i++){
+    const tri = mesh(new THREE.ConeGeometry(0.036,0.05,3),M.accent,false);
+    tri.rotation.z = Math.PI; tri.rotation.x = Math.PI/2;
+    tri.position.set((i-1)*0.045, i===1?0.035:0, 0);
+    emblem.add(tri);
+  }
+  player.parts.emblem=emblem;
+
+  // ---------- 头部（颈 → 头） ----------
+  const neckPivot = new THREE.Group();
+  neckPivot.position.y=0.365; chest.add(neckPivot);
+  player.parts.neck = neckPivot;
+  const neckTop = new THREE.Group();
+  neckTop.position.y=0.09; neckPivot.add(neckTop);
+  player.parts.neckTop = neckTop;
+  const headPivot = new THREE.Group();
+  headPivot.position.y=0; neckTop.add(headPivot);
+  player.parts.head = headPivot;
+
+  const head = mesh(new THREE.SphereGeometry(0.19,16,12),M.skin);
+  head.position.y=0.055; head.scale.set(1,1.06,0.96); headPivot.add(head);
+  player.parts.headMesh = head;
+  const jawPivot = new THREE.Group();
+  jawPivot.position.set(0,-0.035,0.02); headPivot.add(jawPivot);
+  player.parts.jaw = jawPivot;
+  const jaw = mesh(new THREE.SphereGeometry(0.135,12,8),M.skin,false);
+  jaw.position.set(0,0.02,0.015); jaw.scale.set(0.98,0.72,1.02); jawPivot.add(jaw);
+
+  const hair = new THREE.Group(); headPivot.add(hair);
+  player.parts.hair = hair;
+  const hairCap = mesh(new THREE.SphereGeometry(0.203,14,10,0,Math.PI*2,0,Math.PI*0.58),M.hair);
+  hairCap.position.y=0.095; hair.add(hairCap);
+  // 刘海
+  player.parts.bangPivots=[];
+  for(let i=0;i<5;i++){
+    const bangPivot=new THREE.Group();
+    bangPivot.position.set(-0.115+i*0.0575,0.185,0.155);
+    hair.add(bangPivot);
+    player.parts.bangPivots.push(bangPivot);
+    const bang = mesh(new THREE.ConeGeometry(0.036,0.12+Math.abs(i-2)*0.012,4),M.hair,false);
+    bang.rotation.x=2.9; bang.rotation.z=(i-2)*0.12;
+    bangPivot.add(bang);
+  }
+  player.parts.lockPivots=[];
+  for(const s of [-1,1]){
+    const lockPivot=new THREE.Group();
+    lockPivot.position.set(s*0.178,0.01,0.055);
+    hair.add(lockPivot);
+    player.parts.lockPivots.push(lockPivot);
+    const lock = mesh(new THREE.CylinderGeometry(0.036,0.026,0.32,5),M.hair,false);
+    lock.rotation.z=s*0.08; lockPivot.add(lock);
+    const lockTip = mesh(new THREE.ConeGeometry(0.026,0.09,4),M.hair,false);
+    lockTip.position.set(s*0.012,-0.17,0.005); lockTip.rotation.z=s*0.16; lockPivot.add(lockTip);
+  }
+  const tailRoot = new THREE.Group();
+  tailRoot.position.set(0,0.115,-0.165); tailRoot.rotation.x=0.55;
+  hair.add(tailRoot);
+  player.parts.hairTail = tailRoot;
+  let tailParent = tailRoot;
+  for(let i=0;i<3;i++){
+    const seg = new THREE.Group();
+    seg.position.y = i===0?0:-0.155;
+    const c = mesh(new THREE.CylinderGeometry(0.052-i*0.011,0.040-i*0.009,0.18,5),M.hair,false);
+    c.position.y=-0.085; seg.add(c);
+    const tip = new THREE.Group(); tip.position.y=-0.16; seg.add(tip);
+    const tipMesh = mesh(new THREE.SphereGeometry(0.045-i*0.01,6,5),M.hair,false);
+    tip.add(tipMesh);
+    tailParent.add(seg); tailParent=seg;
+    player.parts['hairTail'+(i+1)]=seg;
+    player.parts['hairTailTip'+(i+1)]=tip;
+  }
+
+  const ears = new THREE.Group(); headPivot.add(ears);
+  player.parts.ears = ears;
+  player.parts.earPivots = {};
+  for(const s of [-1,1]){
+    const earPivot = new THREE.Group();
+    earPivot.position.set(s*0.185,0.06,0.005);
+    ears.add(earPivot);
+    player.parts.earPivots[s<0?'L':'R']=earPivot;
+    const ear = mesh(new THREE.ConeGeometry(0.045,0.15,4),M.skin,false);
+    ear.rotation.z=s*1.02; ear.rotation.x=0.1; earPivot.add(ear);
+    const earIn = mesh(new THREE.ConeGeometry(0.022,0.08,4),M.accent,false);
+    earIn.position.set(s*0.005,0,0.013); earIn.rotation.z=s*1.02; earPivot.add(earIn);
+  }
+
+  // 五官
+  player.parts.eyePivots={}; player.parts.browPivots={};
+  for(const s of [-1,1]){
+    const eyePivot=new THREE.Group();
+    eyePivot.position.set(s*0.073,0.068,0.166); headPivot.add(eyePivot);
+    player.parts.eyePivots[s<0?'L':'R']=eyePivot;
+    const white = mesh(new THREE.SphereGeometry(0.034,8,6),M.eyeWhite,false);
+    white.scale.set(1,0.92,0.40); eyePivot.add(white);
+    const iris = mesh(new THREE.SphereGeometry(0.019,7,5),M.eyeIris,false);
+    iris.position.z=0.024; iris.scale.z=0.50; eyePivot.add(iris);
+    const pupil = mesh(new THREE.SphereGeometry(0.0095,6,4),M.eyePupil,false);
+    pupil.position.z=0.032; pupil.scale.z=0.45; eyePivot.add(pupil);
+    const hi = mesh(new THREE.SphereGeometry(0.0042,4,3),M.eyeWhite,false);
+    hi.position.set(s*0.007,0.009,0.037); eyePivot.add(hi);
+    const browPivot=new THREE.Group();
+    browPivot.position.set(s*0.074,0.107,0.181); headPivot.add(browPivot);
+    player.parts.browPivots[s<0?'L':'R']=browPivot;
+    const brow = mesh(new THREE.BoxGeometry(0.062,0.011,0.02),M.hair,false);
+    brow.rotation.z=s*-0.13; browPivot.add(brow);
+    const lid = mesh(new THREE.BoxGeometry(0.07,0.008,0.02),M.skin,false);
+    lid.position.set(s*0.073,0.086,0.178); headPivot.add(lid);
+  }
+  const nosePivot=new THREE.Group();
+  nosePivot.position.set(0,0.035,0.195); headPivot.add(nosePivot);
+  player.parts.nosePivot=nosePivot;
+  const nose = mesh(new THREE.ConeGeometry(0.022,0.055,5),M.skin,false);
+  nose.rotation.x=Math.PI/2; nosePivot.add(nose);
+  const mouthPivot=new THREE.Group();
+  mouthPivot.position.set(0,-0.005,0.196); headPivot.add(mouthPivot);
+  player.parts.mouthPivot=mouthPivot;
+  const mouth = mesh(new THREE.BoxGeometry(0.052,0.009,0.012),M.dark,false);
+  mouthPivot.add(mouth);
+  const lip = mesh(new THREE.BoxGeometry(0.034,0.007,0.012),M.skin,false);
+  lip.position.set(0,-0.011,-0.001); mouthPivot.add(lip);
+  // 面颊/下颌阴影
+  player.parts.cheekPivots={};
+  for(const s of [-1,1]){
+    const cheekPivot=new THREE.Group();
+    cheekPivot.position.set(s*0.105,0.012,0.135); headPivot.add(cheekPivot);
+    player.parts.cheekPivots[s<0?'L':'R']=cheekPivot;
+    const cheek = mesh(new THREE.SphereGeometry(0.04,6,4),M.skin,false);
+    cheek.scale.set(0.9,0.6,0.5); cheekPivot.add(cheek);
+  }
+
+  // 头盔 / 帽 / 面具变体
+  const helmVariants = {};
+  const HELMET_TYPES = ['none','cap','hood','helm','hornhelm','ancient','flame','thunder','crown','tiara','mask','majora','midna','tingle','deity','feather','veil','bandana','goggles'];
+  function helmet(type){
+    const h = new THREE.Group();
+    const add=(geo,mat,x,y,z,cast=false)=>{ const m=mesh(geo,mat,cast); m.position.set(x,y,z); h.add(m); return m; };
+    if(type==='cap'){
+      const cap = mesh(new THREE.SphereGeometry(0.212,14,9,0,Math.PI*2,0,Math.PI*0.56),M.main);
+      cap.position.y=0.105; cap.scale.y=0.78; h.add(cap);
+      const band = mesh(new THREE.CylinderGeometry(0.211,0.213,0.035,16,1,true),M.accent,false);
+      band.position.y=0.115; h.add(band);
+      const brim = mesh(new THREE.CylinderGeometry(0.205,0.215,0.020,16),M.main);
+      brim.position.set(0,0.112,0.040); brim.scale.z=1.08; h.add(brim);
+      const tail = mesh(new THREE.BoxGeometry(0.085,0.17,0.035),M.main,false);
+      tail.position.set(0,0.0,-0.205); tail.rotation.x=0.38; h.add(tail);
+    } else if(type==='hood'){
+      const back = mesh(new THREE.SphereGeometry(0.247,14,11,Math.PI*0.5,Math.PI,0,Math.PI*0.92),M.main);
+      back.position.y=0.085; h.add(back);
+      const top = mesh(new THREE.SphereGeometry(0.238,14,8,0,Math.PI*2,0,Math.PI*0.42),M.main);
+      top.position.y=0.11; h.add(top);
+      const rim = mesh(new THREE.TorusGeometry(0.245,0.022,5,18,Math.PI),M.accent,false);
+      rim.rotation.x=Math.PI/2; rim.rotation.z=Math.PI; rim.position.y=0.06; h.add(rim);
+      const point = mesh(new THREE.ConeGeometry(0.06,0.22,5),M.main,false);
+      point.position.set(0,0.16,-0.19); point.rotation.x=-0.7; h.add(point);
+    } else if(type==='helm'){
+      const dome = mesh(new THREE.SphereGeometry(0.216,14,9,0,Math.PI*2,0,Math.PI*0.56),M.metal);
+      dome.position.y=0.105; h.add(dome);
+      const rim = mesh(new THREE.CylinderGeometry(0.219,0.222,0.085,14,1,true),M.metal);
+      rim.position.y=0.085; h.add(rim);
+      const brow = mesh(new THREE.BoxGeometry(0.31,0.04,0.055),M.metal,false);
+      brow.position.set(0,0.122,0.175); h.add(brow);
+      const noseG = mesh(new THREE.BoxGeometry(0.034,0.13,0.035),M.metal,false);
+      noseG.position.set(0,0.052,0.215); h.add(noseG);
+      for(const s of [-1,1]){
+        const cheek = mesh(new THREE.BoxGeometry(0.05,0.11,0.09),M.metal,false);
+        cheek.position.set(s*0.155,0.012,0.155); h.add(cheek);
+      }
+      const crest = mesh(new THREE.ConeGeometry(0.04,0.13,4),M.accent,false);
+      crest.position.set(0,0.27,0.02); h.add(crest);
+    } else if(type==='hornhelm'){
+      const dome = mesh(new THREE.SphereGeometry(0.218,14,9,0,Math.PI*2,0,Math.PI*0.6),M.metal);
+      dome.position.y=0.105; h.add(dome);
+      const rim = mesh(new THREE.CylinderGeometry(0.222,0.228,0.08,14,1,true),M.metal);
+      rim.position.y=0.082; h.add(rim);
+      for(const s of [-1,1]){
+        const horn = mesh(new THREE.ConeGeometry(0.052,0.34,6),M.fur);
+        horn.position.set(s*0.185,0.24,0.012); horn.rotation.z=s*0.75; horn.rotation.x=-0.25; h.add(horn);
+        const tooth = mesh(new THREE.ConeGeometry(0.026,0.15,4),M.accent,false);
+        tooth.position.set(s*0.15,0.17,0.17); tooth.rotation.x=0.5; h.add(tooth);
+      }
+      const skull = mesh(new THREE.BoxGeometry(0.20,0.08,0.09),M.fur,false);
+      skull.position.set(0,0.19,0.11); h.add(skull);
+    } else if(type==='ancient'){
+      const dome = mesh(new THREE.SphereGeometry(0.218,14,9,0,Math.PI*2,0,Math.PI*0.58),M.metal);
+      dome.position.y=0.108; h.add(dome);
+      const rim = mesh(new THREE.CylinderGeometry(0.221,0.226,0.09,14,1,true),M.metal);
+      rim.position.y=0.083; h.add(rim);
+      const visor = mesh(new THREE.BoxGeometry(0.255,0.045,0.045),M.glow,false);
+      visor.position.set(0,0.115,0.194); h.add(visor);
+      for(const s of [-1,1]){
+        const fin = mesh(new THREE.ConeGeometry(0.045,0.18,4),M.metal,false);
+        fin.position.set(s*0.19,0.18,-0.02); fin.rotation.z=s*0.9; fin.rotation.y=s*0.4; h.add(fin);
+        const rune = mesh(new THREE.BoxGeometry(0.018,0.06,0.014),M.glow,false);
+        rune.position.set(s*0.13,0.07,0.21); h.add(rune);
+      }
+    } else if(type==='flame'){
+      const dome = mesh(new THREE.SphereGeometry(0.22,14,9,0,Math.PI*2,0,Math.PI*0.58),M.metal);
+      dome.position.y=0.105; h.add(dome);
+      const rim = mesh(new THREE.CylinderGeometry(0.224,0.23,0.085,14,1,true),M.metal);
+      rim.position.y=0.08; h.add(rim);
+      const visor = mesh(new THREE.BoxGeometry(0.24,0.035,0.04),M.glow,false);
+      visor.position.set(0,0.115,0.198); h.add(visor);
+      for(const s of [-1,1]){
+        const horn = mesh(new THREE.ConeGeometry(0.06,0.23,5),M.accent);
+        horn.position.set(s*0.16,0.245,0.02); horn.rotation.z=s*0.55; h.add(horn);
+      }
+      const chimney = mesh(new THREE.CylinderGeometry(0.045,0.055,0.12,6),M.metal,false);
+      chimney.position.set(0,0.27,-0.08); h.add(chimney);
+    } else if(type==='thunder'){
+      const dome = mesh(new THREE.SphereGeometry(0.222,14,9,0,Math.PI*2,0,Math.PI*0.6),M.metal);
+      dome.position.y=0.105; h.add(dome);
+      const band = mesh(new THREE.CylinderGeometry(0.225,0.23,0.09,14,1,true),M.accent);
+      band.position.y=0.08; h.add(band);
+      for(let i=0;i<5;i++){
+        const ang=(i/5)*Math.PI*2;
+        const spike = mesh(new THREE.ConeGeometry(0.035,0.22,4),M.accent);
+        spike.position.set(Math.cos(ang)*0.17,0.235,Math.sin(ang)*0.17);
+        spike.rotation.z=-Math.cos(ang)*0.55; spike.rotation.x=Math.sin(ang)*0.55; h.add(spike);
+      }
+      const gem = mesh(new THREE.SphereGeometry(0.045,8,6),M.glow,false);
+      gem.position.set(0,0.105,0.222); h.add(gem);
+    } else if(type==='crown'){
+      const ring = mesh(new THREE.TorusGeometry(0.195,0.022,5,18),M.metal,false);
+      ring.rotation.x=Math.PI/2; ring.position.y=0.16; h.add(ring);
+      for(let i=0;i<3;i++){
+        const p = mesh(new THREE.ConeGeometry(0.03,0.09,4),M.accent,false);
+        p.position.set((i-1)*0.09,0.235,0.14-Math.abs(i-1)*0.02); h.add(p);
+      }
+      const gem = mesh(new THREE.SphereGeometry(0.03,7,5),M.glow,false);
+      gem.position.set(0,0.16,0.195); h.add(gem);
+    } else if(type==='tiara'){
+      const ring = mesh(new THREE.TorusGeometry(0.20,0.014,4,18),M.accent,false);
+      ring.rotation.x=Math.PI/2; ring.position.y=0.155; h.add(ring);
+      for(const s of [-1,1]){
+        const fin = mesh(new THREE.ConeGeometry(0.03,0.2,4),M.accent,false);
+        fin.position.set(s*0.19,0.20,-0.01); fin.rotation.z=s*1.2; fin.rotation.x=-0.2; h.add(fin);
+      }
+      const gem = mesh(new THREE.OctahedronGeometry(0.045,0),M.glow,false);
+      gem.position.set(0,0.17,0.185); h.add(gem);
+    } else if(type==='mask'){
+      const face = mesh(new THREE.SphereGeometry(0.195,12,10),M.accent,false);
+      face.position.set(0,0.055,0.145); face.scale.set(1.02,1.16,0.42); h.add(face);
+      const noseM = mesh(new THREE.ConeGeometry(0.034,0.09,4),M.accent,false);
+      noseM.position.set(0,0.035,0.235); noseM.rotation.x=Math.PI/2; h.add(noseM);
+      for(const s of [-1,1]){
+        const eye = mesh(new THREE.SphereGeometry(0.032,6,5),M.dark,false);
+        eye.position.set(s*0.075,0.085,0.218); eye.scale.set(1.1,0.8,0.5); h.add(eye);
+        const mark = mesh(new THREE.BoxGeometry(0.02,0.07,0.012),M.main,false);
+        mark.position.set(s*0.12,0.02,0.215); mark.rotation.z=s*0.3; h.add(mark);
+      }
+      const leaf = mesh(new THREE.ConeGeometry(0.1,0.24,4),M.main,false);
+      leaf.position.set(0,0.27,-0.01); leaf.rotation.x=0.25; h.add(leaf);
+    } else if(type==='majora'){
+      const face = mesh(new THREE.SphereGeometry(0.21,12,10),M.accent,false);
+      face.position.set(0,0.05,0.14); face.scale.set(1.05,1.12,0.38); h.add(face);
+      for(const s of [-1,1]){
+        const eye = mesh(new THREE.SphereGeometry(0.05,8,6),new THREE.MeshStandardMaterial({color:0xffdd44,emissive:0xaa7700,emissiveIntensity:1.2}),false);
+        eye.position.set(s*0.08,0.08,0.225); eye.scale.set(1.2,1.4,0.5); h.add(eye);
+        const horn = mesh(new THREE.ConeGeometry(0.042,0.28,4),M.main);
+        horn.position.set(s*0.19,0.24,0.02); horn.rotation.z=s*0.8; h.add(horn);
+      }
+      const mouth = mesh(new THREE.ConeGeometry(0.055,0.12,4),M.dark,false);
+      mouth.position.set(0,-0.035,0.225); mouth.rotation.x=Math.PI; h.add(mouth);
+    } else if(type==='midna'){
+      const dome = mesh(new THREE.SphereGeometry(0.22,14,9,0,Math.PI*2,0,Math.PI*0.6),M.metal);
+      dome.position.y=0.105; h.add(dome);
+      for(const s of [-1,1]){
+        const horn = mesh(new THREE.ConeGeometry(0.04,0.32,5),M.metal);
+        horn.position.set(s*0.17,0.23,0.0); horn.rotation.z=s*1.05; horn.rotation.x=-0.35; h.add(horn);
+        const fin = mesh(new THREE.ConeGeometry(0.05,0.18,4),M.accent,false);
+        fin.position.set(s*0.21,0.12,-0.06); fin.rotation.z=s*1.4; h.add(fin);
+      }
+      const gem = mesh(new THREE.OctahedronGeometry(0.04,0),M.glow,false);
+      gem.position.set(0,0.17,0.195); h.add(gem);
+      const eye = mesh(new THREE.BoxGeometry(0.16,0.035,0.02),M.glow,false);
+      eye.position.set(0,0.105,0.205); h.add(eye);
+    } else if(type==='tingle'){
+      const hat = mesh(new THREE.ConeGeometry(0.235,0.62,10),M.main);
+      hat.position.set(0,0.33,0); h.add(hat);
+      const pom = mesh(new THREE.SphereGeometry(0.05,7,5),M.accent,false);
+      pom.position.set(0,0.64,0); h.add(pom);
+      const band = mesh(new THREE.CylinderGeometry(0.213,0.216,0.04,14,1,true),M.accent,false);
+      band.position.y=0.14; h.add(band);
+    } else if(type==='deity'){
+      const face = mesh(new THREE.SphereGeometry(0.205,14,11),M.metal,false);
+      face.position.set(0,0.06,0.13); face.scale.set(1.0,1.12,0.5); h.add(face);
+      for(const s of [-1,1]){
+        const eye = mesh(new THREE.SphereGeometry(0.034,6,5),M.dark,false);
+        eye.position.set(s*0.078,0.09,0.225); eye.scale.set(1.3,0.9,0.4); h.add(eye);
+        const horn = mesh(new THREE.ConeGeometry(0.05,0.38,5),M.metal);
+        horn.position.set(s*0.18,0.26,0.0); horn.rotation.z=s*0.55; horn.rotation.x=-0.2; h.add(horn);
+        const mark = mesh(new THREE.BoxGeometry(0.022,0.10,0.014),M.accent,false);
+        mark.position.set(s*0.12,-0.01,0.222); mark.rotation.z=s*0.5; h.add(mark);
+      }
+      const mark = mesh(new THREE.BoxGeometry(0.018,0.12,0.014),M.accent,false);
+      mark.position.set(0,0.27,0.09); mark.rotation.x=0.2; h.add(mark);
+    } else if(type==='feather'){
+      const back = mesh(new THREE.SphereGeometry(0.247,14,11,Math.PI*0.5,Math.PI,0,Math.PI*0.92),M.main);
+      back.position.y=0.085; h.add(back);
+      const top = mesh(new THREE.SphereGeometry(0.238,14,8,0,Math.PI*2,0,Math.PI*0.45),M.main);
+      top.position.y=0.11; h.add(top);
+      const fur = mesh(new THREE.TorusGeometry(0.245,0.032,5,18),M.fur,false);
+      fur.rotation.x=Math.PI/2; fur.position.y=0.055; h.add(fur);
+      for(let i=0;i<3;i++){
+        const f = mesh(new THREE.ConeGeometry(0.035,0.3,4),M.accent,false);
+        f.position.set(-0.12+i*0.12,0.28,-0.15); f.rotation.x=-0.5; f.rotation.z=(i-1)*0.35; h.add(f);
+      }
+    } else if(type==='veil'){
+      const back = mesh(new THREE.SphereGeometry(0.244,14,11,Math.PI*0.5,Math.PI,0,Math.PI*0.9),M.main);
+      back.position.y=0.085; h.add(back);
+      const top = mesh(new THREE.SphereGeometry(0.236,14,8,0,Math.PI*2,0,Math.PI*0.4),M.main);
+      top.position.y=0.11; h.add(top);
+      const veil = mesh(new THREE.BoxGeometry(0.23,0.14,0.02),M.accent,false);
+      veil.position.set(0,-0.005,0.185); h.add(veil);
+      const band = mesh(new THREE.TorusGeometry(0.21,0.018,4,18),M.accent,false);
+      band.rotation.x=Math.PI/2; band.position.y=0.145; h.add(band);
+    } else if(type==='bandana'){
+      const band = mesh(new THREE.BoxGeometry(0.42,0.06,0.20),M.accent,false);
+      band.position.set(0,0.16,0.0); band.rotation.x=0.05; h.add(band);
+      const knot = mesh(new THREE.SphereGeometry(0.05,6,5),M.accent,false);
+      knot.position.set(0,0.14,-0.20); h.add(knot);
+      for(const s of [-1,1]){
+        const tail = mesh(new THREE.BoxGeometry(0.06,0.2,0.02),M.accent,false);
+        tail.position.set(s*0.06,0.02,-0.23); tail.rotation.z=s*0.3; h.add(tail);
+      }
+    } else if(type==='goggles'){
+      const cap = mesh(new THREE.SphereGeometry(0.213,14,9,0,Math.PI*2,0,Math.PI*0.55),M.leather);
+      cap.position.y=0.105; cap.scale.y=0.74; h.add(cap);
+      const strap = mesh(new THREE.BoxGeometry(0.43,0.035,0.22),M.dark,false);
+      strap.position.set(0,0.10,0.0); h.add(strap);
+      for(const s of [-1,1]){
+        const ring = mesh(new THREE.TorusGeometry(0.05,0.012,4,12),M.metal,false);
+        ring.position.set(s*0.075,0.10,0.20); h.add(ring);
+        const lens = mesh(new THREE.CircleGeometry(0.043,12),M.glass,false);
+        lens.position.set(s*0.075,0.10,0.202); h.add(lens);
+      }
+    }
+    h.visible = false;
+    headPivot.add(h);
+    return h;
+  }
+  HELMET_TYPES.forEach(t=>{ helmVariants[t]=helmet(t); });
+  player.parts.helmets = helmVariants;
+
+  // ---------- 手臂（锁骨/肩/肘/腕/指） ----------
+  function makeArm(side){
+    const clav = new THREE.Group();
+    clav.position.set(side*0.20,0.27,0);
+    chest.add(clav);
+    const pivot = new THREE.Group();
+    pivot.position.set(side*0.135,0,0);
+    clav.add(pivot);
+    const shoulder = mesh(new THREE.SphereGeometry(0.095,8,6),M.main);
+    shoulder.position.y=0.0; pivot.add(shoulder);
+    const upper = mesh(new THREE.CylinderGeometry(0.076,0.064,0.30,8),M.main);
+    upper.position.y=-0.155; pivot.add(upper);
+    const upperMid = new THREE.Group(); upperMid.position.y=-0.15; pivot.add(upperMid);
+    const elbow = new THREE.Group(); elbow.position.y=-0.15; upperMid.add(elbow);
+    const fore = mesh(new THREE.CylinderGeometry(0.061,0.052,0.27,8),M.skin);
+    fore.position.y=-0.135; elbow.add(fore);
+    const sleeve = mesh(new THREE.CylinderGeometry(0.068,0.056,0.25,8),M.main);
+    sleeve.position.y=-0.135; elbow.add(sleeve);
+    const foreMid = new THREE.Group(); foreMid.position.y=-0.135; elbow.add(foreMid);
+    // 腕关节
+    const wrist = new THREE.Group(); wrist.position.y=-0.135; foreMid.add(wrist);
+    const handPivot = new THREE.Group(); wrist.add(handPivot);
+    const hand = mesh(new THREE.SphereGeometry(0.062,8,6),M.skin);
+    hand.position.y=-0.022; hand.scale.set(0.95,1.15,0.8); handPivot.add(hand);
+    // 4 指 × 3 节 + 拇指 × 3 节
+    const fingers=[];
+    for(let f=0;f<4;f++){
+      const base=new THREE.Group();
+      base.position.set((f-1.5)*0.023,-0.058,0.006);
+      base.rotation.x=0.22;
+      handPivot.add(base);
+      const s1=mesh(new THREE.BoxGeometry(0.019,0.05,0.019),M.skin,false);
+      s1.position.y=-0.025; base.add(s1);
+      const mid=new THREE.Group(); mid.position.y=-0.05; base.add(mid);
+      const s2=mesh(new THREE.BoxGeometry(0.017,0.042,0.017),M.skin,false);
+      s2.position.y=-0.021; mid.add(s2);
+      const dist=new THREE.Group(); dist.position.y=-0.042; mid.add(dist);
+      const s3=mesh(new THREE.BoxGeometry(0.015,0.030,0.015),M.skin,false);
+      s3.position.y=-0.015; dist.add(s3);
+      fingers.push({base,mid,dist});
+    }
+    const thumbBase=new THREE.Group();
+    thumbBase.position.set(side*0.042,-0.030,0.030);
+    thumbBase.rotation.z=side*-0.55;
+    handPivot.add(thumbBase);
+    const t1=mesh(new THREE.BoxGeometry(0.021,0.042,0.021),M.skin,false);
+    t1.position.y=-0.021; thumbBase.add(t1);
+    const thumbMid=new THREE.Group(); thumbMid.position.y=-0.042; thumbBase.add(thumbMid);
+    const t2=mesh(new THREE.BoxGeometry(0.019,0.034,0.019),M.skin,false);
+    t2.position.y=-0.017; thumbMid.add(t2);
+    const thumbDist=new THREE.Group(); thumbDist.position.y=-0.034; thumbMid.add(thumbDist);
+    const t3=mesh(new THREE.BoxGeometry(0.016,0.026,0.016),M.skin,false);
+    t3.position.y=-0.013; thumbDist.add(t3);
+    fingers.push({base:thumbBase,mid:thumbMid,dist:thumbDist,thumb:true});
+    const cuff = mesh(new THREE.TorusGeometry(0.057,0.014,4,12),M.leather,false);
+    cuff.rotation.x=Math.PI/2; cuff.position.y=0.025; wrist.add(cuff);
+    const bracer = new THREE.Group(); elbow.add(bracer); bracer.visible=false;
+    const bc = mesh(new THREE.CylinderGeometry(0.073,0.062,0.15,8),M.metal);
+    bc.position.y=-0.155; bracer.add(bc);
+    const bt = mesh(new THREE.TorusGeometry(0.068,0.012,4,12),M.accent,false);
+    bt.rotation.x=Math.PI/2; bt.position.y=-0.225; bracer.add(bt);
+    return {clav,pivot,elbow,wrist,upper,fore,hand,fingers,shoulder,bracer,sleeve,side};
+  }
+  player.parts.armL = makeArm(-1);
+  player.parts.armR = makeArm(1);
+
+  // ---------- 腿（髋/膝/踝/趾） ----------
+  function makeLeg(side){
+    const pivot = new THREE.Group();
+    pivot.position.set(side*0.125,0.78,0);
+    visual.add(pivot);
+    const thigh = mesh(new THREE.CylinderGeometry(0.09,0.078,0.40,8),M.secondary);
+    thigh.position.y=-0.20; pivot.add(thigh);
+    const thighMid = new THREE.Group(); thighMid.position.y=-0.20; pivot.add(thighMid);
+    const knee = new THREE.Group(); knee.position.y=-0.20; thighMid.add(knee);
+    const shin = mesh(new THREE.CylinderGeometry(0.073,0.058,0.34,8),M.secondary);
+    shin.position.y=-0.17; knee.add(shin);
+    const shinMid = new THREE.Group(); shinMid.position.y=-0.17; knee.add(shinMid);
+    const ankle = new THREE.Group(); ankle.position.y=-0.17; shinMid.add(ankle);
+    const foot = new THREE.Group(); ankle.add(foot);
+    const boot = mesh(new THREE.BoxGeometry(0.135,0.16,0.28),M.leather);
+    boot.position.set(0,0.04,0.045); boot.rotation.x=-0.04; foot.add(boot);
+    const toePivot = new THREE.Group(); toePivot.position.set(0,0.015,0.09); foot.add(toePivot);
+    const toe = mesh(new THREE.BoxGeometry(0.12,0.07,0.10),M.leather,false);
+    toe.position.set(0,-0.015,0.085); toe.rotation.x=-0.08; toePivot.add(toe);
+    // 5 趾 × 2 节（靴前缘的关节链）
+    const toes=[];
+    for(let t=0;t<5;t++){
+      const base=new THREE.Group();
+      base.position.set((t-2)*0.023,-0.028,0.105);
+      base.rotation.y=(t-2)*0.06;
+      toePivot.add(base);
+      const tb=mesh(new THREE.BoxGeometry(0.019,0.026,0.050),M.leather,false);
+      tb.position.z=0.026; base.add(tb);
+      const tip=new THREE.Group(); tip.position.z=0.050; base.add(tip);
+      const tt=mesh(new THREE.BoxGeometry(0.017,0.020,0.030),M.leather,false);
+      tt.position.z=0.014; tip.add(tt);
+      toes.push({base,tip});
+    }
+    const cuff = mesh(new THREE.TorusGeometry(0.083,0.022,4,12),M.leather,false);
+    cuff.rotation.x=Math.PI/2; cuff.position.y=0.135; ankle.add(cuff);
+    const greave = new THREE.Group(); knee.add(greave); greave.visible=false;
+    const gv = mesh(new THREE.BoxGeometry(0.13,0.22,0.13),M.metal);
+    gv.position.set(0,-0.13,0.02); greave.add(gv);
+    const gt = mesh(new THREE.TorusGeometry(0.075,0.011,4,12),M.accent,false);
+    gt.rotation.x=Math.PI/2; gt.position.y=-0.02; greave.add(gt);
+    return {pivot,thighMid,knee,shinMid,ankle,foot,toePivot,toes,thigh,shin,boot,toe,greave,side};
+  }
+  player.parts.legL = makeLeg(-1);
+  player.parts.legR = makeLeg(1);
+
+  // ---------- 肩甲 / 胸甲 / 护腿 / 裙甲 ----------
+  const chestPlate = new THREE.Group(); chest.add(chestPlate); chestPlate.visible=false;
+  const cp = mesh(new THREE.BoxGeometry(0.44,0.42,0.10),M.metal);
+  cp.position.set(0,0.02,0.205); chestPlate.add(cp);
+  const cpLower = mesh(new THREE.BoxGeometry(0.40,0.17,0.09),M.metal);
+  cpLower.position.set(0,-0.19,0.195); chestPlate.add(cpLower);
+  const cpTrim = mesh(new THREE.BoxGeometry(0.46,0.035,0.11),M.accent,false);
+  cpTrim.position.set(0,0.20,0.205); chestPlate.add(cpTrim);
+  const cpGem = mesh(new THREE.OctahedronGeometry(0.045,0),M.glow,false);
+  cpGem.position.set(0,0.09,0.27); chestPlate.add(cpGem);
+  for(const s of [-1,1]){
+    const strap = mesh(new THREE.BoxGeometry(0.06,0.32,0.035),M.leather,false);
+    strap.position.set(s*0.16,0.08,0.26); strap.rotation.z=s*0.08; chestPlate.add(strap);
+    const stud = mesh(new THREE.SphereGeometry(0.018,5,4),M.accent,false);
+    stud.position.set(s*0.19,0.14,0.27); chestPlate.add(stud);
+  }
+  player.parts.chestPlate = chestPlate;
+
+  const scaleChest = new THREE.Group(); chest.add(scaleChest); scaleChest.visible=false;
+  for(let row=0;row<3;row++){
+    for(let i=0;i<5;i++){
+      const a=(i-2)*0.42;
+      const sc = mesh(new THREE.BoxGeometry(0.085,0.055,0.032),row%2?M.metal:M.accent,false);
+      sc.position.set(Math.sin(a)*0.26,0.14-row*0.11,Math.cos(a)*0.26);
+      sc.rotation.y=a; sc.rotation.x=-0.12; scaleChest.add(sc);
+    }
+  }
+  player.parts.scaleChest = scaleChest;
+
+  const furChest = new THREE.Group(); chest.add(furChest); furChest.visible=false;
+  for(let i=0;i<14;i++){
+    const a=(i/14)*Math.PI*2;
+    const f = mesh(new THREE.SphereGeometry(0.075,6,5),M.fur,false);
+    f.position.set(Math.cos(a)*0.22,0.23+Math.sin(i*1.7)*0.05,Math.sin(a)*0.17);
+    f.scale.set(1.2,0.7,1.0); furChest.add(f);
+  }
+  player.parts.furChest = furChest;
+
+  const pauldrons = [];
+  for(const arm of [player.parts.armL,player.parts.armR]){
+    const grp = new THREE.Group(); grp.position.set(arm.side*0.015,0.02,0);
+    arm.pivot.add(grp); grp.visible=false;
+    const plate = mesh(new THREE.SphereGeometry(0.145,9,7,0,Math.PI*2,0,Math.PI*0.65),M.metal);
+    plate.position.set(arm.side*0.03,0.01,0); plate.scale.set(1.05,0.8,1.15); grp.add(plate);
+    const rim = mesh(new THREE.TorusGeometry(0.135,0.014,4,14,Math.PI),M.accent,false);
+    rim.position.set(arm.side*0.03,-0.04,0); rim.rotation.x=Math.PI/2; rim.rotation.z=arm.side>0?0:Math.PI; grp.add(rim);
+    // 毛皮肩饰
+    for(let i=0;i<4;i++){
+      const fu = mesh(new THREE.SphereGeometry(0.055,5,4),M.fur,false);
+      fu.position.set(arm.side*0.08,0.04+i*0.025,-0.04+i*0.02); grp.add(fu);
+    }
+    pauldrons.push(grp);
+  }
+  player.parts.pauldrons = pauldrons;
+
+  const greaves = [player.parts.legL.greave,player.parts.legR.greave];
+  player.parts.greaves = greaves;
+  const bracers = [player.parts.armL.bracer,player.parts.armR.bracer];
+  player.parts.bracers = bracers;
+
+  const skirt = new THREE.Group(); skirt.position.y=0.79; visual.add(skirt); skirt.visible=false;
+  const skirtPanels = [];
+  const SKIRT_ANGLES=[30,90,150,210,270,330];
+  for(const deg of SKIRT_ANGLES){
+    const a=deg*Math.PI/180;
+    const p=new THREE.Group();
+    p.position.set(Math.sin(a)*0.235,0,Math.cos(a)*0.225);
+    p.rotation.y=a;
+    const panel=mesh(new THREE.BoxGeometry(0.175,0.36,0.035),M.main,false);
+    panel.position.set(0,-0.18,0.015); panel.rotation.x=0.10; p.add(panel);
+    const trim=mesh(new THREE.BoxGeometry(0.18,0.035,0.04),M.accent,false);
+    trim.position.set(0,-0.36,0.02); p.add(trim);
+    skirt.add(p); skirtPanels.push(p);
+  }
+  player.parts.skirt = skirt; player.parts.skirtPanels = skirtPanels;
+
+  const capeRoot = new THREE.Group();
+  capeRoot.position.set(0,0.18,-0.225); chest.add(capeRoot); capeRoot.visible=false;
+  const cape1 = mesh(new THREE.BoxGeometry(0.44,0.34,0.025),M.accent,false);
+  cape1.position.y=-0.17; capeRoot.add(cape1);
+  const capeLower = new THREE.Group(); capeLower.position.y=-0.34; capeRoot.add(capeLower);
+  const cape2 = mesh(new THREE.BoxGeometry(0.42,0.30,0.02),M.main,false);
+  cape2.position.y=-0.15; capeLower.add(cape2);
+  const capeClasp = mesh(new THREE.SphereGeometry(0.035,6,5),M.accent,false);
+  capeClasp.position.y=0.01; capeRoot.add(capeClasp);
+  player.parts.capeRoot = capeRoot; player.parts.capeLower = capeLower;
+
+  const scarf = new THREE.Group(); chest.add(scarf); scarf.visible=false;
+  const scarfWrap = mesh(new THREE.TorusGeometry(0.165,0.035,5,14),M.accent,false);
+  scarfWrap.rotation.x=Math.PI/2; scarfWrap.position.y=0.315; scarf.add(scarfWrap);
+  const scarfTail = new THREE.Group(); scarfTail.position.set(0.07,0.27,-0.16); scarf.add(scarfTail);
+  const st1 = mesh(new THREE.BoxGeometry(0.10,0.26,0.02),M.accent,false); st1.position.y=-0.13; scarfTail.add(st1);
+  const st2 = new THREE.Group(); st2.position.y=-0.26; scarfTail.add(st2);
+  const st2m = mesh(new THREE.BoxGeometry(0.09,0.22,0.018),M.accent,false); st2m.position.y=-0.11; st2.add(st2m);
+  player.parts.scarf = scarf; player.parts.scarfTail = scarfTail; player.parts.scarfTail2 = st2;
+
+  const furCollar = new THREE.Group(); chest.add(furCollar); furCollar.visible=false;
+  for(let i=0;i<12;i++){
+    const a=(i/12)*Math.PI*2;
+    const f = mesh(new THREE.SphereGeometry(0.07,5,4),M.fur,false);
+    f.position.set(Math.cos(a)*0.20,0.30,Math.sin(a)*0.16); f.scale.set(1.1,0.8,1.0); furCollar.add(f);
+  }
+  player.parts.furCollar = furCollar;
+
+  const runes = new THREE.Group(); chest.add(runes); runes.visible=false;
+  for(const s of [-1,1]){
+    const r1=mesh(new THREE.BoxGeometry(0.018,0.26,0.012),M.glow,false);
+    r1.position.set(s*0.15,0.03,0.262); r1.rotation.z=s*0.06; runes.add(r1);
+    const r2=mesh(new THREE.BoxGeometry(0.10,0.016,0.012),M.glow,false);
+    r2.position.set(s*0.10,-0.13,0.262); runes.add(r2);
+  }
+  const rTop=mesh(new THREE.TorusGeometry(0.11,0.012,4,14,Math.PI),M.glow,false);
+  rTop.position.set(0,0.18,0.258); rTop.rotation.x=Math.PI/2; rTop.rotation.z=Math.PI; runes.add(rTop);
+  player.parts.runes = runes;
+
+  // 背部箭袋 / 弓 / 盾
+  const quiver = new THREE.Group();
+  quiver.position.set(0.20,0.06,-0.23); quiver.rotation.z=-0.22; quiver.rotation.x=0.12; chest.add(quiver);
+  const qBody = mesh(new THREE.CylinderGeometry(0.075,0.06,0.42,8),M.leather);
+  qBody.position.y=-0.10; quiver.add(qBody);
+  const qRim = mesh(new THREE.TorusGeometry(0.074,0.012,4,12),M.accent,false);
+  qRim.rotation.x=Math.PI/2; qRim.position.y=0.11; quiver.add(qRim);
+  for(let i=0;i<3;i++){
+    const shaft=mesh(new THREE.CylinderGeometry(0.008,0.008,0.38,4),M.wood,false);
+    shaft.position.set((i-1)*0.025,0.18,0); quiver.add(shaft);
+    const fl=mesh(new THREE.ConeGeometry(0.028,0.07,4),M.accent,false);
+    fl.position.set((i-1)*0.025,0.38,0); quiver.add(fl);
+  }
+  player.parts.quiver=quiver;
+
+  const bowBack = new THREE.Group();
+  bowBack.position.set(-0.20,0.05,-0.24); bowBack.rotation.z=0.22; chest.add(bowBack);
+  const bowArc = mesh(new THREE.TorusGeometry(0.36,0.018,4,16,Math.PI*1.25),M.wood);
+  bowArc.rotation.z=-Math.PI*0.12; bowBack.add(bowArc);
+  const bowStrPts=[new THREE.Vector3(-0.32,0.24,0),new THREE.Vector3(0.30,-0.22,0)];
+  const bowStrGeo=new THREE.BufferGeometry().setFromPoints(bowStrPts);
+  const bowStr=new THREE.Line(bowStrGeo,M.string); bowBack.add(bowStr);
+  player.parts.bowBack=bowBack;
+
+  function makeShieldMesh(){
+    const s=new THREE.Group();
+    const body=mesh(new THREE.CylinderGeometry(0.30,0.30,0.06,12),M.shieldBody);
+    body.rotation.x=Math.PI/2; s.add(body);
+    const rim=mesh(new THREE.TorusGeometry(0.30,0.032,5,20),M.shieldRim);
+    s.add(rim);
+    const boss=mesh(new THREE.SphereGeometry(0.07,8,6),M.shieldRim,false);
+    boss.position.z=0.045; boss.scale.z=0.55; s.add(boss);
+    for(let i=0;i<4;i++){
+      const a=(i/4)*Math.PI*2+Math.PI/4;
+      const stud=mesh(new THREE.SphereGeometry(0.022,5,4),M.accent,false);
+      stud.position.set(Math.cos(a)*0.22,Math.sin(a)*0.22,0.045); s.add(stud);
+    }
+    const em=mesh(new THREE.BoxGeometry(0.10,0.16,0.015),M.accent,false);
+    em.position.z=0.05; s.add(em);
+    return s;
+  }
+  const backShield=makeShieldMesh();
+  backShield.position.set(0,0.03,-0.29); backShield.rotation.set(0.12,Math.PI,0);
+  chest.add(backShield);
+  player.parts.backShield=backShield;
+
+  const frontShield=makeShieldMesh();
+  frontShield.position.set(-0.02,0.11,0.10);
+  frontShield.rotation.set(-0.10,0,0.04);
+  frontShield.visible=false;
+  player.parts.armL.wrist.add(frontShield);
+  player.parts.frontShield=frontShield;
+
+  const surfBoard=makeShieldMesh();
+  surfBoard.position.set(0,0.02,0.06); surfBoard.rotation.set(Math.PI/2,0,0);
+  surfBoard.visible=false; visual.add(surfBoard);
+  player.parts.surfBoard=surfBoard;
+
+  // 滑翔伞
+  const glider=new THREE.Group();
+  glider.position.set(0,2.02,0.05); glider.visible=false; visual.add(glider);
+  const wingMat=new THREE.MeshStandardMaterial({color:0xb84a3a,roughness:0.8,side:THREE.DoubleSide});
+  const wingGeo=new THREE.BufferGeometry();
+  wingGeo.setAttribute('position',new THREE.Float32BufferAttribute([
+    -0.95,0.0,0.28,  0,0.16,0.34,  0,0.0,-0.34,
+    -0.95,0.0,0.28,  0,0.0,-0.34,  -0.52,0.04,-0.18,
+    0.95,0.0,0.28,   0,0.0,-0.34,  0,0.16,0.34,
+    0.95,0.0,0.28,   0.52,0.04,-0.18, 0,0.0,-0.34
+  ],3));
+  wingGeo.computeVertexNormals();
+  const wing=new THREE.Mesh(wingGeo,wingMat); wing.castShadow=true; glider.add(wing);
+  const wingTrim=new THREE.Mesh(new THREE.TorusGeometry(0.45,0.018,4,18,Math.PI),new THREE.MeshStandardMaterial({color:0xe8d8b0,roughness:0.7}));
+  wingTrim.position.set(0,0.02,0.05); wingTrim.rotation.x=Math.PI/2; wingTrim.rotation.z=Math.PI; glider.add(wingTrim);
+  for(const s of [-1,1]){
+    const rod=mesh(new THREE.CylinderGeometry(0.018,0.018,0.55,5),M.wood,false);
+    rod.position.set(s*0.42,0.0,-0.03); rod.rotation.z=s*1.1; glider.add(rod);
+  }
+  player.parts.paraglider=glider;
+
+  // ---------- 武器 ----------
+  const weaponRoot=new THREE.Group();
+  weaponRoot.position.set(0,-0.035,0.035);
+  weaponRoot.rotation.set(-0.30,0.05,0.10);
+  player.parts.armR.wrist.add(weaponRoot);
+  const weaponVariants={};
+  function buildSword(type){
+    const w=new THREE.Group();
+    const isGreat=type==='greatsword';
+    const len=isGreat?0.98:0.76, wid=isGreat?0.105:0.058;
+    const blade=mesh(new THREE.BoxGeometry(wid,len,0.018),M.blade);
+    blade.position.y=len/2+0.03; w.add(blade);
+    const tip=mesh(new THREE.ConeGeometry(wid*0.72,isGreat?0.20:0.14,4),M.blade);
+    tip.position.y=len+0.10; w.add(tip);
+    const fuller=mesh(new THREE.BoxGeometry(wid*0.22,len*0.75,0.024),M.bladeGlow,false);
+    fuller.position.y=len/2+0.03; w.add(fuller);
+    const guard=mesh(new THREE.BoxGeometry(isGreat?0.30:0.19,0.035,0.055),M.metal,false);
+    guard.position.y=0.015; w.add(guard);
+    if(isGreat){
+      for(const s of [-1,1]){
+        const wing=mesh(new THREE.ConeGeometry(0.045,0.16,4),M.accent,false);
+        wing.position.set(s*0.13,0.015,0); wing.rotation.z=s*1.4; w.add(wing);
+      }
+    }
+    const grip=mesh(new THREE.CylinderGeometry(0.024,0.024,isGreat?0.28:0.19,6),M.leather,false);
+    grip.position.y=-0.10; w.add(grip);
+    for(let i=0;i<3;i++){
+      const wrap=mesh(new THREE.TorusGeometry(0.027,0.007,4,10),M.accent,false);
+      wrap.rotation.x=Math.PI/2; wrap.position.y=-0.045-i*0.06; w.add(wrap);
+    }
+    const pommel=mesh(new THREE.SphereGeometry(0.036,6,5),M.metal,false);
+    pommel.position.y=isGreat?-0.265:-0.205; w.add(pommel);
+    w.userData.type='sword';
+    return w;
+  }
+  weaponVariants.sword=buildSword('sword');
+  weaponVariants.greatsword=buildSword('greatsword');
+  // 长枪
+  weaponVariants.spear=(function(){
+    const w=new THREE.Group();
+    const shaft=mesh(new THREE.CylinderGeometry(0.023,0.026,1.75,7),M.wood);
+    shaft.position.y=0.25; w.add(shaft);
+    for(let i=0;i<4;i++){
+      const ring=mesh(new THREE.TorusGeometry(0.028,0.008,4,10),M.accent,false);
+      ring.rotation.x=Math.PI/2; ring.position.y=-0.45+i*0.28; w.add(ring);
+    }
+    const headBase=mesh(new THREE.ConeGeometry(0.05,0.14,6),M.metal);
+    headBase.position.y=1.16; w.add(headBase);
+    const blade=mesh(new THREE.ConeGeometry(0.065,0.34,6),M.blade);
+    blade.position.y=1.36; w.add(blade);
+    const gem=mesh(new THREE.OctahedronGeometry(0.035,0),M.glow,false);
+    gem.position.set(0,1.13,0.06); w.add(gem);
+    w.userData.type='spear';
+    return w;
+  })();
+  for(const k in weaponVariants){ weaponVariants[k].visible=false; weaponRoot.add(weaponVariants[k]); }
+  player.parts.weaponRoot=weaponRoot;
+  player.parts.weaponVariants=weaponVariants;
+  player.parts.sword=weaponRoot;
+
+  // 瞄准时左手的弓
+  const bowHand=new THREE.Group();
+  bowHand.position.set(0,-0.03,0.06); bowHand.rotation.set(0,0,-0.35);
+  bowHand.visible=false;
+  player.parts.armL.wrist.add(bowHand);
+  const hbArc=mesh(new THREE.TorusGeometry(0.42,0.016,4,18,Math.PI*1.35),M.wood);
+  hbArc.rotation.z=-Math.PI*0.18; bowHand.add(hbArc);
+  const hbStrGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-0.37,0.28,0),new THREE.Vector3(0.35,-0.20,0)]);
+  const hbStr=new THREE.Line(hbStrGeo,M.string); bowHand.add(hbStr);
+  player.parts.bowHand=bowHand;
+
+  // ---------- 关节注册表（1024 个：129 解剖关节 + 895 体积关节场，球/铰链） ----------
+  const joints=[];
+  function addJoint(name,obj,type,parent){
+    joints.push({name,obj,type,parent:parent||obj.parent,field:name.indexOf('field.')===0});
+    if(obj) obj.userData.joint={name,type};
+    return obj;
+  }
+  addJoint('spine',spine,'ball',visual);
+  addJoint('spine.mid',spineMid,'ball',spine);
+  addJoint('spine.upper',spineUpper,'ball',spineMid);
+  addJoint('chest',chest,'ball',spineUpper);
+  addJoint('neck',neckPivot,'ball',chest);
+  addJoint('neck.top',neckTop,'ball',neckPivot);
+  addJoint('head',headPivot,'ball',neckTop);
+  addJoint('jaw',jawPivot,'hinge',headPivot);
+  addJoint('eye.L',player.parts.eyePivots.L,'ball',headPivot);
+  addJoint('eye.R',player.parts.eyePivots.R,'ball',headPivot);
+  addJoint('brow.L',player.parts.browPivots.L,'hinge',headPivot);
+  addJoint('brow.R',player.parts.browPivots.R,'hinge',headPivot);
+  addJoint('ear.L',player.parts.earPivots.L,'ball',headPivot);
+  addJoint('ear.R',player.parts.earPivots.R,'ball',headPivot);
+  addJoint('nose',player.parts.nosePivot,'ball',headPivot);
+  addJoint('mouth',player.parts.mouthPivot,'hinge',headPivot);
+  addJoint('cheek.L',player.parts.cheekPivots.L,'ball',headPivot);
+  addJoint('cheek.R',player.parts.cheekPivots.R,'ball',headPivot);
+  addJoint('hair',hair,'ball',headPivot);
+  for(let i=0;i<5;i++) addJoint('hair.bang'+(i+1),player.parts.bangPivots[i],'hinge',hair);
+  for(const [lp,side] of [[player.parts.lockPivots[0],'L'],[player.parts.lockPivots[1],'R']]) addJoint('hair.lock'+side,lp,'ball',hair);
+  for(let i=1;i<=3;i++){
+    addJoint('hair.tail'+i,player.parts['hairTail'+i],'hinge',i===1?player.parts.hairTail:player.parts['hairTail'+(i-1)]);
+    addJoint('hair.tail'+i+'.tip',player.parts['hairTailTip'+i],'ball',player.parts['hairTail'+i]);
+  }
+  for(const [arm,side] of [[player.parts.armL,'L'],[player.parts.armR,'R']]){
+    addJoint('shoulder.'+side, arm.clav,'ball',chest);
+    addJoint('upperarm.'+side, arm.pivot,'ball',arm.clav);
+    addJoint('upperarm.mid.'+side, arm.upperMid,'hinge',arm.pivot);
+    addJoint('elbow.'+side, arm.elbow,'hinge',arm.upperMid);
+    addJoint('forearm.'+side, arm.foreMid,'hinge',arm.elbow);
+    addJoint('wrist.'+side, arm.wrist,'ball',arm.foreMid);
+    addJoint('hand.'+side, arm.handPivot,'ball',arm.wrist);
+    arm.fingers.forEach((f,i)=>{
+      addJoint('finger.'+side+(i+1), f.base,'hinge',arm.handPivot);
+      addJoint('finger.'+side+(i+1)+'b', f.mid,'hinge',f.base);
+      addJoint('finger.'+side+(i+1)+'c', f.dist,'hinge',f.mid);
+    });
+  }
+  for(const [leg,side] of [[player.parts.legL,'L'],[player.parts.legR,'R']]){
+    addJoint('hip.'+side, leg.pivot,'ball',visual);
+    addJoint('thigh.mid.'+side, leg.thighMid,'hinge',leg.pivot);
+    addJoint('knee.'+side, leg.knee,'hinge',leg.thighMid);
+    addJoint('shin.mid.'+side, leg.shinMid,'hinge',leg.knee);
+    addJoint('ankle.'+side, leg.ankle,'hinge',leg.shinMid);
+    addJoint('foot.'+side, leg.foot,'ball',leg.ankle);
+    addJoint('toe.'+side, leg.toePivot,'hinge',leg.foot);
+    leg.toes.forEach((t,i)=>{
+      addJoint('toe.'+side+(i+1), t.base,'hinge',leg.toePivot);
+      addJoint('toe.'+side+(i+1)+'b', t.tip,'hinge',t.base);
+    });
+  }
+  addJoint('cape',player.parts.capeRoot,'ball',chest);
+  addJoint('cape.lower',player.parts.capeLower,'hinge',player.parts.capeRoot);
+  addJoint('skirt',player.parts.skirt,'ball',visual);
+  player.parts.skirtPanels.forEach((p,i)=>addJoint('skirt.panel'+(i+1),p,'hinge',player.parts.skirt));
+  addJoint('scarf',player.parts.scarf,'ball',chest);
+  addJoint('scarf.tail',player.parts.scarfTail,'hinge',player.parts.scarf);
+  addJoint('scarf.tail2',player.parts.scarfTail2,'hinge',player.parts.scarfTail);
+  addJoint('quiver',player.parts.quiver,'ball',chest);
+  addJoint('bow',player.parts.bowBack,'ball',chest);
+  addJoint('shield.back',player.parts.backShield,'ball',chest);
+  addJoint('shield.front',player.parts.frontShield,'ball',player.parts.armL.wrist);
+  addJoint('weapon',player.parts.weaponRoot,'ball',player.parts.armR.wrist);
+  addJoint('belt',belt,'ball',visual);
+  addJoint('pouch',pouch,'ball',visual);
+
+  // ---------- 高密度关节场：把骨架补到 1024+（真实 pivot，跟随所属部件） ----------
+  const FIELD_TARGET=1024;
+  const fieldRegions=[
+    {obj:chest,r:[0.30,0.36,0.24],w:190},
+    {obj:headPivot,r:[0.20,0.22,0.20],w:105},
+    {obj:spineMid,r:[0.26,0.26,0.22],w:70},
+    {obj:hair,r:[0.22,0.20,0.22],w:36},
+    {obj:player.parts.armL.pivot,r:[0.10,0.30,0.10],w:52},
+    {obj:player.parts.armL.elbow,r:[0.09,0.26,0.09],w:30},
+    {obj:player.parts.armL.wrist,r:[0.08,0.10,0.08],w:16},
+    {obj:player.parts.armR.pivot,r:[0.10,0.30,0.10],w:52},
+    {obj:player.parts.armR.elbow,r:[0.09,0.26,0.09],w:30},
+    {obj:player.parts.armR.wrist,r:[0.08,0.10,0.08],w:16},
+    {obj:player.parts.legL.pivot,r:[0.12,0.30,0.12],w:44},
+    {obj:player.parts.legL.knee,r:[0.10,0.28,0.10],w:28},
+    {obj:player.parts.legL.ankle,r:[0.10,0.12,0.10],w:16},
+    {obj:player.parts.legR.pivot,r:[0.12,0.30,0.12],w:44},
+    {obj:player.parts.legR.knee,r:[0.10,0.28,0.10],w:28},
+    {obj:player.parts.legR.ankle,r:[0.10,0.12,0.10],w:16},
+  ];
+  let _fseed=0x9e3779b9;
+  const _frand=()=>{ _fseed=(_fseed*1664525+1013904223)>>>0; return _fseed/4294967296; };
+  const _fneed=Math.max(0,FIELD_TARGET-joints.length);
+  const _fwsum=fieldRegions.reduce((a,b)=>a+b.w,0);
+  let _fleft=_fneed;
+  fieldRegions.forEach((rg,ri)=>{
+    const cnt=ri===fieldRegions.length-1?_fleft:Math.min(_fleft,Math.round(rg.w/_fwsum*_fneed));
+    _fleft-=cnt;
+    for(let k=0;k<cnt;k++){
+      const th=_frand()*Math.PI*2, ph=Math.acos(2*_frand()-1), rr=0.55+0.45*_frand();
+      const p=new THREE.Group();
+      p.name='jointField';
+      p.position.set(Math.sin(ph)*Math.cos(th)*rg.r[0]*rr, Math.cos(ph)*rg.r[1]*rr, Math.sin(ph)*Math.sin(th)*rg.r[2]*rr);
+      rg.obj.add(p);
+      addJoint('field.'+(joints.length+1),p,_frand()<0.5?'ball':'hinge',rg.obj);
+    }
+  });
+  player.joints=joints;
+  player.jointCount=joints.length;
+  player.parts.fingers={L:player.parts.armL.fingers,R:player.parts.armR.fingers};
+
+  // Opening vista: the northern rim of the Great Plateau, looking down over
+  // the Temple of Time toward Hyrule Castle.  The old man's camp is just ahead.
+  player.pos.set(-100, terrainHeight(-100,600)+0.05, 600);
+  player.yaw=2.85;
+  g.position.copy(player.pos);
+  g.rotation.y=player.yaw;
+  scene.add(g);
+}
+
+await loadingStep(0.38,'唤醒勇者');
+buildPlayer();
+applyArmor('hylian', true);
+updateWeaponHUD();
+try{ updateArrowHUD(); }catch(e){}
+
+// 达尔克尔的护盾泡泡
+const darukBubble = new THREE.Mesh(
+  new THREE.SphereGeometry(1.15,18,14),
+  new THREE.MeshBasicMaterial({color:0xff8844,transparent:true,opacity:0.10,side:THREE.BackSide,depthWrite:false,blending:THREE.AdditiveBlending})
+);
+darukBubble.position.y=1.05; darukBubble.visible=false; player.group.add(darukBubble);
+
+// ============================================================
+// ★ 关节调试视图（J 键）
+// ============================================================
+const jointDebug = (function(){
+  const list = player.joints || [];
+  const n = list.length;
+  const pos = new Float32Array(n*6), col = new Float32Array(n*6), ppos = new Float32Array(n*3);
+  const cBall = new THREE.Color(0x66ccff), cHinge = new THREE.Color(0xffaa44);
+  list.forEach((j,i)=>{
+    const c = j.type==='hinge'?cHinge:cBall;
+    for(let k=0;k<2;k++){ col[i*6+k*3]=c.r; col[i*6+k*3+1]=c.g; col[i*6+k*3+2]=c.b; }
+  });
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const lines=new THREE.LineSegments(geo,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:0.85,depthTest:false}));
+  lines.frustumCulled=false; lines.renderOrder=999;
+  const pgeo=new THREE.BufferGeometry();
+  pgeo.setAttribute('position',new THREE.BufferAttribute(ppos,3));
+  const points=new THREE.Points(pgeo,new THREE.PointsMaterial({size:0.05,color:0xcfe9ff,depthTest:false,sizeAttenuation:true,transparent:true,opacity:0.9}));
+  points.frustumCulled=false; points.renderOrder=1000;
+  const group=new THREE.Group(); group.add(lines); group.add(points); group.visible=false;
+  scene.add(group);
+  return {list,n,pos,ppos,geo,pgeo,group,visible:false};
+})();
+const _jointA=new THREE.Vector3(), _jointB=new THREE.Vector3();
+function updateJointDebug(){
+  if(!jointDebug.visible) return;
+  const pos=jointDebug.pos, ppos=jointDebug.ppos;
+  for(let i=0;i<jointDebug.list.length;i++){
+    const j=jointDebug.list[i];
+    if(!j.obj) continue;
+    j.obj.getWorldPosition(_jointA);
+    if(j.field){
+      // 体积关节只画点，不画连线，避免 1024 条线糊成一团
+      pos[i*6]=_jointA.x; pos[i*6+1]=_jointA.y; pos[i*6+2]=_jointA.z;
+      pos[i*6+3]=_jointA.x; pos[i*6+4]=_jointA.y; pos[i*6+5]=_jointA.z;
+      ppos[i*3]=_jointA.x; ppos[i*3+1]=_jointA.y; ppos[i*3+2]=_jointA.z;
+      continue;
+    }
+    if(j.parent) j.parent.getWorldPosition(_jointB); else _jointB.copy(_jointA);
+    pos[i*6]=_jointB.x; pos[i*6+1]=_jointB.y; pos[i*6+2]=_jointB.z;
+    pos[i*6+3]=_jointA.x; pos[i*6+4]=_jointA.y; pos[i*6+5]=_jointA.z;
+    ppos[i*3]=_jointA.x; ppos[i*3+1]=_jointA.y; ppos[i*3+2]=_jointA.z;
+  }
+  jointDebug.geo.attributes.position.needsUpdate=true;
+  jointDebug.pgeo.attributes.position.needsUpdate=true;
+}
+function toggleJointDebug(){
+  jointDebug.visible=!jointDebug.visible;
+  jointDebug.group.visible=jointDebug.visible;
+  const hud=$('jointHud');
+  if(hud){
+    hud.style.display=jointDebug.visible?'block':'none';
+    if(jointDebug.visible){
+      const balls=jointDebug.list.filter(j=>j.type!=='hinge').length;
+      hud.innerHTML=`JOINTS ${jointDebug.n} <span class="jh-ball">ball ${balls}</span> <span class="jh-hinge">hinge ${jointDebug.n-balls}</span><br><span class="jh-dim">129 解剖关节 + 895 体积关节场（胸/头/脊柱/发丝/四肢）<br>spine ×3 · neck ×2 · head · jaw · eyes · brows · ears · nose · mouth · cheeks<br>shoulder · upperarm ×2 · forearm ×2 · wrist · hand · 5 fingers × 3 · hip · thigh ×2 · shin ×2 · ankle · foot · 5 toes × 2<br>hair (cap · 5 bangs · 2 locks · 3 tail × 2) · cape · skirt ×6 · scarf ×3 · quiver · bow · shields · weapon · belt · pouch · field ×895</span><br><span class="jh-dim">魔物：真节点池 12 只 × 1024 = 12,288 个 Object3D（170m 内按距离实体化；全部节点 CPU 同步约 2ms/帧；GPU 单 draw call）</span>`;
+    }
+  }
+  SFX && SFX.rune && SFX.rune();
+}
+
+// ============================================================
+// ★ 1024 真节点池（魔物）+ GPU 实例化关节渲染
+//    · 每只魔物 1024 个真实 Object3D 关节，按距离从池中实体化
+//    · 关节挂在父部件的 jointRoot 下，root 关闭 matrixWorld 自动更新，
+//      场景遍历只检查 1 个 flag（CPU 加速）
+//    · 全部关节由单次 instanced draw call 渲染（GPU 加速）
+// ============================================================
+const JOINT_NODE_LIMIT=12;        // 同时实体化的魔物数
+const JOINT_PARTS_PER_CHAR=12;    // 每只魔物最多 12 个父部件槽
+const JOINT_GPU_MAX=JOINT_NODE_LIMIT*1024;
+const jointNodePool={chars:[]};
+function acquireJointNodes(m){
+  if(m.jointNodes) return m.jointNodes;
+  if(jointNodePool.chars.length>=JOINT_NODE_LIMIT) return null;
+  if(!m.joints) buildMonsterJoints(m);
+  const j=m.joints, nodes=new Array(j.n), roots=new Map();
+  for(let i=0;i<j.n;i++){
+    const p=j.par[i];
+    let root=roots.get(p);
+    if(!root){
+      root=new THREE.Group(); root.name='jointRoot';
+      root.matrixAutoUpdate=false; root.matrixWorldAutoUpdate=false; root.updateMatrix();
+      p.add(root); roots.set(p,root);
+    }
+    const n=new THREE.Object3D(); n.name='joint';
+    n.position.set(j.off[i*3],j.off[i*3+1],j.off[i*3+2]);
+    n.matrixAutoUpdate=false; n.matrixWorldAutoUpdate=false; n.updateMatrix();
+    root.add(n); nodes[i]=n;
+  }
+  m.jointNodes={nodes,roots:[...roots.values()]};
+  jointNodePool.chars.push(m);
+  return m.jointNodes;
+}
+function releaseJointNodes(m){
+  if(!m.jointNodes) return;
+  for(const r of m.jointNodes.roots) if(r.parent) r.parent.remove(r);
+  m.jointNodes=null;
+  const i=jointNodePool.chars.indexOf(m); if(i>=0) jointNodePool.chars.splice(i,1);
+}
+const jointGPU=(function(){
+  const geo=new THREE.InstancedBufferGeometry();
+  const quad=new THREE.PlaneGeometry(1,1);
+  geo.index=quad.index;
+  geo.setAttribute('position',quad.getAttribute('position'));
+  geo.setAttribute('uv',quad.getAttribute('uv'));
+  const aOffset=new THREE.InstancedBufferAttribute(new Float32Array(JOINT_GPU_MAX*3),3).setUsage(THREE.DynamicDrawUsage);
+  const aPart=new THREE.InstancedBufferAttribute(new Float32Array(JOINT_GPU_MAX),1).setUsage(THREE.DynamicDrawUsage);
+  const aColor=new THREE.InstancedBufferAttribute(new Float32Array(JOINT_GPU_MAX*3),3).setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('aOffset',aOffset); geo.setAttribute('aPart',aPart); geo.setAttribute('aColor',aColor);
+  geo.instanceCount=0;
+  const mats=[]; for(let i=0;i<JOINT_NODE_LIMIT*JOINT_PARTS_PER_CHAR;i++) mats.push(new THREE.Matrix4());
+  const mat=new THREE.ShaderMaterial({
+    uniforms:{ uPartMats:{value:mats}, uSize:{value:0.055} },
+    transparent:true, depthTest:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    vertexShader:`
+      attribute vec3 aOffset; attribute float aPart; attribute vec3 aColor;
+      uniform mat4 uPartMats[${JOINT_NODE_LIMIT*JOINT_PARTS_PER_CHAR}];
+      uniform float uSize;
+      varying vec3 vColor; varying vec2 vUv;
+      void main(){
+        mat4 pm=uPartMats[int(aPart+0.5)];
+        vec4 wp=pm*vec4(aOffset,1.0);
+        vec4 mv=viewMatrix*wp;
+        mv.xy+=position.xy*uSize*2.0;
+        vColor=aColor; vUv=position.xy*2.0;
+        gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader:`
+      varying vec3 vColor; varying vec2 vUv;
+      void main(){
+        float d=length(vUv);
+        if(d>1.0) discard;
+        float a=smoothstep(1.0,0.30,d);
+        gl_FragColor=vec4(vColor,a*0.85);
+      }`
+  });
+  const mesh=new THREE.Mesh(geo,mat);
+  mesh.frustumCulled=false; mesh.renderOrder=998; mesh.visible=false;
+  scene.add(mesh);
+  return {mesh,geo,aOffset,aPart,aColor,mats,slots:[],dirty:true,cpuBudget:JOINT_NODE_LIMIT};
+})();
+const JOINT_TYPE_COLORS={bokoblin:0xff8a6a,lizalfos:0x7dff9a,chuchu:0x7fb8ff,guardian:0xffc36a,flyingGuardian:0xffc36a,hinox:0xff6a8a,molduga:0xd8b06a,keese:0xbfa0ff,wizzrobe:0xffe066,lynel:0xff5a5a,yiga:0x9a8aff,moblin:0xffa06a,mazKoshia:0x9fe8ff,divineBoss:0xff9f6a,ganon:0xff5a9a};
+function rebuildJointGPU(){
+  const chars=jointNodePool.chars.slice(0,JOINT_NODE_LIMIT);
+  const slots=[]; let count=0;
+  const off=jointGPU.aOffset.array, part=jointGPU.aPart.array, col=jointGPU.aColor.array;
+  for(let s=0;s<chars.length;s++){
+    const m=chars[s], j=m.joints;
+    const parts=[], map=new Map();
+    for(let i=0;i<j.n;i++){
+      const p=j.par[i];
+      let idx=map.get(p);
+      if(idx===undefined){
+        if(parts.length>=JOINT_PARTS_PER_CHAR){ idx=0; }
+        else { idx=parts.length; parts.push(p); }
+        map.set(p,idx);
+      }
+    }
+    const c=new THREE.Color(JOINT_TYPE_COLORS[m.type]||0x37e6b0);
+    const base=s*1024, mb=s*JOINT_PARTS_PER_CHAR;
+    for(let i=0;i<j.n;i++){
+      const k=base+i;
+      off[k*3]=j.off[i*3]; off[k*3+1]=j.off[i*3+1]; off[k*3+2]=j.off[i*3+2];
+      part[k]=mb+map.get(j.par[i]);
+      col[k*3]=c.r; col[k*3+1]=c.g; col[k*3+2]=c.b;
+    }
+    slots.push(parts);
+    count+=j.n;
+  }
+  jointGPU.slots=slots;
+  jointGPU.geo.instanceCount=count;
+  jointGPU.aOffset.needsUpdate=true; jointGPU.aPart.needsUpdate=true; jointGPU.aColor.needsUpdate=true;
+  jointGPU.dirty=false;
+}
+function updateJointNodePool(){
+  const cand=[];
+  for(let i=0;i<monsters.length;i++){
+    const m=monsters[i];
+    if(m.state==='dead'||!m.joints) continue;
+    const dx=m.pos.x-player.pos.x, dz=m.pos.z-player.pos.z;
+    const d=dx*dx+dz*dz;
+    if(d<170*170) cand.push([d,m]);
+  }
+  cand.sort((a,b)=>a[0]-b[0]);
+  let changed=false;
+  for(const m of jointNodePool.chars.slice()){
+    let keep=false;
+    for(let k=0;k<cand.length&&k<JOINT_NODE_LIMIT;k++){ if(cand[k][1]===m){ keep=true; break; } }
+    if(!keep){ releaseJointNodes(m); changed=true; }
+  }
+  for(let k=0;k<cand.length&&k<JOINT_NODE_LIMIT;k++){
+    const m=cand[k][1];
+    if(!m.jointNodes){ acquireJointNodes(m); changed=true; }
+  }
+  if(changed||jointGPU.dirty){ rebuildJointGPU(); }
+}
+function syncJointNodes(m){
+  const j=m.joints, nodes=m.jointNodes.nodes;
+  for(let i=0;i<j.n;i++){
+    nodes[i].matrixWorld.multiplyMatrices(j.par[i].matrixWorld,nodes[i].matrix);
+  }
+}
+function updateJointGPU(){
+  if(!jointDebug.visible||jointGPU.geo.instanceCount===0){ jointGPU.mesh.visible=false; return; }
+  jointGPU.mesh.visible=true;
+  for(let s=0;s<jointGPU.slots.length;s++){
+    const parts=jointGPU.slots[s];
+    for(let k=0;k<parts.length;k++){
+      parts[k].updateWorldMatrix(true,false);
+      jointGPU.mats[s*JOINT_PARTS_PER_CHAR+k].copy(parts[k].matrixWorld);
+    }
+  }
+  let budget=jointGPU.cpuBudget;
+  for(const m of jointNodePool.chars){
+    if(budget--<=0) break;
+    syncJointNodes(m);
+  }
+  jointGPU.cpuSynced=jointNodePool.chars.length;
+}
+
+// ============================================================
+// ★ 服装应用 / 武器外观 / 盾牌外观
+// ============================================================
+function shadeHex(hex,mul=0.5){
+  const c=new THREE.Color(hex); c.multiplyScalar(mul); return c.getHex();
+}
+function tintToon(mat,base,shadowMul=0.5,emissive=null,emissiveIntensity=0){
+  if(!mat||!mat.uniforms) return;
+  mat.uniforms.uBase.value.setHex(base);
+  mat.uniforms.uShadow.value.setHex(shadeHex(base,shadowMul));
+  if(emissive!==null){
+    mat.uniforms.uEmissive.value.setHex(emissive);
+    mat.uniforms.uEmissiveIntensity.value=emissiveIntensity;
+  }
+}
+function getArmorBonus(){
+  return currentArmor&&currentArmor.bonus?currentArmor.bonus:{};
+}
+function currentArmorId(){ return currentArmor?currentArmor.id:'hylian'; }
+
+function applyArmor(id,silent=false){
+  const set=ARMOR_SETS.find(a=>a.id===id)||ARMOR_SETS[1];
+  if(!set) return;
+  currentArmor=set;
+  player.armorDef=set.def;
+  player.armorEffect=set.effect;
+  player.korokSight=(set.bonus&&set.bonus.korok)||1;
+  const M=player.mats;
+  if(M){
+    tintToon(M.main,set.colors.main,0.5);
+    tintToon(M.secondary,set.colors.secondary,0.5);
+    tintToon(M.accent,set.colors.accent,0.55);
+    tintToon(M.metal,set.colors.metal,0.5);
+    tintToon(M.leather,set.colors.leather,0.5);
+    tintToon(M.fur,set.colors.fur,0.5);
+    const glow=set.look&&set.look.runes?(set.colors.glow||set.colors.accent):set.colors.glow;
+    tintToon(M.glow,set.colors.glow||set.colors.accent,0.4,glow,set.look&&set.look.runes?1.9:0.55);
+    if(M.bladeGlow){
+      M.bladeGlow.uniforms.uEmissive.value.setHex(set.look&&set.look.runes?(set.colors.glow||0x66ccff):0x224466);
+      M.bladeGlow.uniforms.uEmissiveIntensity.value=set.look&&set.look.runes?1.2:0.3;
+    }
+  }
+  const L=set.look||{};
+  // 头部
+  const heads=player.parts.helmets;
+  if(heads){
+    for(const k in heads) heads[k].visible=false;
+    if(heads[L.head||'none']) heads[L.head||'none'].visible=true;
+  }
+  const hideHair=['hood','helm','hornhelm','ancient','flame','thunder','deity','mask','majora','midna','tingle','feather','veil'];
+  if(player.parts.hair) player.parts.hair.visible=!hideHair.includes(L.head);
+  if(player.parts.ears) player.parts.ears.visible=!['helm','hornhelm','ancient','flame','thunder','deity','mask','majora','midna','tingle'].includes(L.head);
+  // 胸 / 肩 / 臂 / 腿
+  if(player.parts.chestPlate) player.parts.chestPlate.visible=L.chest==='plate';
+  if(player.parts.scaleChest) player.parts.scaleChest.visible=L.chest==='scale';
+  if(player.parts.furChest) player.parts.furChest.visible=L.chest==='fur';
+  if(player.parts.pauldrons) player.parts.pauldrons.forEach(p=>p.visible=!!L.shoulders);
+  if(player.parts.bracers) player.parts.bracers.forEach(p=>p.visible=!!L.bracers);
+  if(player.parts.greaves) player.parts.greaves.forEach(p=>p.visible=!!L.greaves);
+  if(player.parts.armL&&player.parts.armL.sleeve){
+    const long=L.arms!=='short';
+    player.parts.armL.sleeve.visible=long; player.parts.armR.sleeve.visible=long;
+  }
+  if(player.parts.skirt){
+    player.parts.skirt.visible=!!L.skirt;
+    const long=L.skirt==='long', armor=L.skirt==='armor';
+    player.parts.skirtPanels.forEach(p=>{
+      p.scale.y=long?1.45:armor?0.92:1.0;
+      const panel=p.children[0], trim=p.children[1];
+      if(panel) panel.material=armor?M.metal:M.main;
+      if(trim) trim.material=armor?M.accent:M.accent;
+    });
+  }
+  if(player.parts.capeRoot) player.parts.capeRoot.visible=!!L.cape;
+  if(player.parts.scarf) player.parts.scarf.visible=!!L.scarf;
+  if(player.parts.furCollar) player.parts.furCollar.visible=!!L.fur;
+  if(player.parts.runes) player.parts.runes.visible=!!L.runes;
+  if(player.parts.tunicHem) player.parts.tunicHem.visible=L.chest!=='plate'&&L.chest!=='scale';
+  if(player.parts.hemTrim) player.parts.hemTrim.visible=L.chest!=='plate'&&L.chest!=='scale';
+  // 服装 HUD
+  const nameEl=$('armorName'),defEl=$('armorDef'),effEl=$('armorEffect'),dots=$('armorDots');
+  if(nameEl) nameEl.textContent=set.name;
+  if(defEl) defEl.textContent='防御 '+set.def;
+  if(effEl) effEl.textContent=set.effect;
+  if(dots){
+    dots.innerHTML='';
+    const lit=Math.max(1,Math.min(5,Math.ceil(set.def/4)));
+    for(let i=0;i<5;i++){
+      const d=document.createElement('span'); d.className='ah-dot'+(i<lit?' on':''); dots.appendChild(d);
+    }
+  }
+  if(!silent){ toast('已换上 · '+set.name); SFX.rune(); }
+}
+
+function updateWeaponVisual(){
+  if(!player.parts||!player.parts.weaponVariants) return;
+  const w=currentWeapon;
+  const V=player.parts.weaponVariants;
+  for(const k in V) V[k].visible=false;
+  const root=player.parts.weaponRoot;
+  if(root) root.visible=!!w;
+  if(!w){ return; }
+  const type=w.type==='greatsword'?'greatsword':w.type==='spear'?'spear':'sword';
+  if(V[type]) V[type].visible=true;
+  const M=player.mats;
+  const elemCol={fire:0xff7022,ice:0x66ccff,thunder:0xffdd44,light:0xffeeaa}[w.elem];
+  if(elemCol){
+    tintToon(M.blade,elemCol,0.45,elemCol,0.85);
+    tintToon(M.bladeGlow,elemCol,0.4,elemCol,1.6);
+  } else {
+    tintToon(M.blade,0xc8d0d8,0.5,0x223344,0.15);
+    tintToon(M.bladeGlow,0xaaddff,0.4,0x224466,0.2);
+  }
+  if(w.id==='master_sword'){
+    tintToon(M.blade,0xd8e8ff,0.45,0xaaddff,0.9);
+    tintToon(M.bladeGlow,0xffffff,0.4,0xaaddff,2.0);
+  }
+  if(player.parts.sword) player.parts.sword.visible=!!currentWeapon&&!player.shieldUp;
+}
+
+function refreshShieldVisual(){
+  const M=player.mats; if(!M) return;
+  const id=currentShield?currentShield.id:'travelers_shield';
+  const cols={
+    pot_lid:[0x5a5550,0x9a5a2a],
+    wooden_shield:[0x6a4a2a,0x3a2a1a],
+    travelers_shield:[0x3a5a8a,0x8a8a90],
+    soldiers_shield:[0x4a5a6a,0xb8b8c0],
+    knight_shield:[0x2a3a5a,0xc8c8d0],
+    royal_shield:[0x2a2a4a,0xd8b45a],
+    ancient_shield:[0xd8d8c8,0x66ccff],
+    hylian_shield:[0x3a5a9a,0xd8c860],
+    mighty_lynel_shield:[0x5a2a1a,0xd8b45a],
+  }[id]||[0x3a5a8a,0x8a8a90];
+  tintToon(M.shieldBody,cols[0],0.5,id==='ancient_shield'?0x44aaff:null,id==='ancient_shield'?1.2:0);
+  tintToon(M.shieldRim,cols[1],0.55);
+  const shieldName=$('shieldName');
+  if(shieldName) shieldName.textContent=currentShield?currentShield.name+(currentShield.def?' (防'+currentShield.def+')':''):'无';
+}
+
+// ============================================================
+// 地标
+// ============================================================
+const LANDMARKS={
+  castle:{x:0,z:-50,name:'海拉鲁城堡'},
+  greatPlateau:{x:-150,z:425,name:'初始台地'},
+  divineWater:{x:750,z:-200,name:'水之神兽 · 瓦·露塔'},
+  divineWind:{x:-850,z:-825,name:'风之神兽 · 瓦·梅德'},
+  divineFire:{x:825,z:-675,name:'火之神兽 · 瓦·鲁达尼亚'},
+  divineThunder:{x:-825,z:675,name:'雷之神兽 · 瓦·娜波力斯'},
+  kakariko:{x:-300,z:600,name:'卡卡利科村'},
+  hateno:{x:550,z:550,name:'哈特诺村'},
+  zora:{x:750,z:-150,name:'卓拉领地'},
+  goron:{x:825,z:-600,name:'鼓隆城'},
+  gerudoTown:{x:-750,z:700,name:'格鲁德小镇'},
+  rito:{x:-800,z:-750,name:'利特村'},
+  masterSword:{x:-100,z:-800,name:'克洛格森林 · 大师剑'},
+  ganon:{x:0,z:-100,name:'海拉鲁城堡 · 灾厄盖侬'},
+  dlcShrine:{x:-140,z:410,name:'回生之祠 · 英杰之诗'},
+};
+
+// ============================================================
+// 碰撞 / 可攀爬物体
+// ============================================================
+const collidables=[];
+const walkSurfaces=[];
+const windmillBlades=[];
+const campfires=[];
+const npcs=[];
+const caves=[];
+const caveOres=[];
+const goddessStatues=[];
+
+function pushCollidable(x,z,radius,type,height,climbable,extra={}){
+  collidables.push({pos:new THREE.Vector3(x,terrainHeight(x,z),z),radius,type,height,climbable,...extra});
+}
+
+// ---- 树 / 石 / 草：收集实例数据，最后一次性合并为 InstancedMesh ----
+const TREE_TRUNK_INSTANCES=[], TREE_LEAF_INSTANCES=[], ROCK_INSTANCES=[], GRASS_INSTANCES=[], FLOWER_STEM_INSTANCES=[], FLOWER_HEAD_INSTANCES=[], BUSH_INSTANCES=[], PINE_INSTANCES=[];
+const TREE_TRUNK_GEO=new THREE.CylinderGeometry(0.25,0.4,1,6);
+const TREE_LEAF_GEO=new THREE.IcosahedronGeometry(1,1);
+const ROCK_GEO=new THREE.DodecahedronGeometry(1,0);
+const TREE_TRUNK_MAT=toon(0x5a4430,{shadowColor:0x2a1a10,steps:3});
+const TREE_LEAF_MAT=toon(0xffffff,{shadowColor:0x6a6a6a,steps:3,rimColor:0x88ff88});
+const ROCK_MAT=toon(0x9a968c,{shadowColor:0x46423a,steps:3,rimColor:0xccc6b8});
+const GRASS_MAT=toon(0xa8c96a,{shadowColor:0x3f5a20,steps:2,rimColor:0xd8ffa0,wind:0.072,side:THREE.DoubleSide});
+const FLOWER_STEM_MAT=toon(0x5a8038,{shadowColor:0x263d14,steps:2,rimColor:0xbbff99});
+const FLOWER_HEAD_MAT=toon(0xffffff,{shadowColor:0x7a7462,steps:2,rimColor:0xffffff});
+const BUSH_MAT=toon(0xffffff,{shadowColor:0x334426,steps:3,rimColor:0xbbff88,wind:0.02});
+const PINE_MAT=toon(0xffffff,{shadowColor:0x2a3a28,steps:3,rimColor:0x88bb88,wind:0.012});
+const FLOWER_COLORS=[0xfff2c8,0xffd6e8,0xffe066,0xa8d8ff,0xff9a76,0xe8e8ff];
+
+function makeTree(x,z){
+  const h=terrainHeight(x,z);
+  const th=rand(4,8);
+  TREE_TRUNK_INSTANCES.push({x,y:h+th/2,z,sx:rand(0.8,1.15),sy:th,sz:rand(0.8,1.15),ry:rand(0,Math.PI*2)});
+  const col=new THREE.Color().setHSL(rand(0.24,0.32),rand(0.34,0.55),rand(0.22,0.36));
+  let topLeafY=th;
+  const crownN=randInt(3,5);
+  for(let i=0,n=crownN;i<n;i++){
+    const r=rand(1.4,3.0);
+    const cy=th+rand(-0.5,2.1);
+    const a=rand(0,6.28), rr=i===0?rand(0,0.4):rand(0.5,1.4);
+    TREE_LEAF_INSTANCES.push({
+      x:x+Math.cos(a)*rr, y:h+cy, z:z+Math.sin(a)*rr,
+      sx:r*rand(0.9,1.2), sy:r*rand(0.62,0.9), sz:r*rand(0.9,1.2),
+      ry:rand(0,Math.PI*2), rx:rand(-0.2,0.2), rz:rand(-0.1,0.1),
+      color:col.clone().multiplyScalar(rand(0.84,1.15))
+    });
+    topLeafY=Math.max(topLeafY,cy+r*0.55);
+  }
+  pushCollidable(x,z,0.8,'tree',topLeafY+0.3,true);
+}
+function makePineTree(x,z){
+  const h=terrainHeight(x,z);
+  const th=rand(5,9);
+  TREE_TRUNK_INSTANCES.push({x,y:h+th/2,z,sx:rand(0.55,0.8),sy:th,sz:rand(0.55,0.8),ry:rand(0,6.28)});
+  const col=new THREE.Color().setHSL(rand(0.30,0.38),rand(0.28,0.42),rand(0.16,0.26));
+  for(let i=0;i<4;i++){
+    const r=(1.9-i*0.35)*rand(0.9,1.15);
+    PINE_INSTANCES.push({
+      x:x+rand(-0.18,0.18), y:h+th*0.55+i*th*0.16, z:z+rand(-0.18,0.18),
+      sx:r, sy:rand(2.0,3.0), sz:r, ry:rand(0,6.28), color:col
+    });
+  }
+  pushCollidable(x,z,0.6,'tree',th+2.6,true);
+}
+function makeRock(x,z,scale=1){
+  const h=terrainHeight(x,z);
+  const r=rand(0.8,2.5)*scale;
+  ROCK_INSTANCES.push({
+    x,y:h+r*0.4,z, sx:r,sy:r,sz:r,
+    rx:rand(0,3), ry:rand(0,3), rz:rand(0,3),
+    color:new THREE.Color().setHSL(0.1,0.05,rand(0.72,0.92))
+  });
+  collidables.push({pos:new THREE.Vector3(x,h+r*0.4,z),radius:r*0.8,type:'rock',height:r*1.9,climbable:r>1.2});
+}
+const grassGroup=new THREE.Group();
+let GRASS_GEO=null;
+function makeGrassTuft(x,z){
+  const h=terrainHeight(x,z); if(h<WATER_LEVEL+0.5||h>170) return;
+  const s=rand(0.72,1.16);
+  GRASS_INSTANCES.push({
+    x,y:h,z, ry:rand(0,Math.PI*2), sx:rand(1.0,1.65), sy:rand(0.55,0.95), sz:rand(1.0,1.65),
+    color:new THREE.Color(s*rand(0.82,1.0),s*rand(0.90,1.05),s*rand(0.62,0.86))
+  });
+}
+function makeFlower(x,z,palette){
+  const h=terrainHeight(x,z); if(h<WATER_LEVEL+0.8||h>220) return;
+  const stemH=rand(0.22,0.5);
+  FLOWER_STEM_INSTANCES.push({x,y:h+stemH/2,z,sx:0.55,sy:stemH,sz:0.55,ry:rand(0,6.28)});
+  const col=new THREE.Color(palette[randInt(0,palette.length-1)]);
+  const n=randInt(1,2);
+  for(let i=0;i<n;i++){
+    FLOWER_HEAD_INSTANCES.push({
+      x:x+rand(-0.07,0.07), y:h+stemH+rand(0,0.08), z:z+rand(-0.07,0.07),
+      sx:rand(0.65,1.05), sy:rand(0.35,0.55), sz:rand(0.65,1.05),
+      ry:rand(0,6.28), rx:rand(-0.2,0.2), color:col
+    });
+  }
+}
+function makeBush(x,z){
+  const h=terrainHeight(x,z); if(h<WATER_LEVEL+0.8||h>210) return;
+  const s=rand(0.38,0.92);
+  BUSH_INSTANCES.push({
+    x,y:h+s*0.52,z,sx:s*rand(0.9,1.35),sy:s*rand(0.7,1.0),sz:s*rand(0.9,1.35),
+    ry:rand(0,6.28), rx:rand(-0.15,0.15),
+    color:new THREE.Color().setHSL(rand(0.25,0.33),rand(0.30,0.46),rand(0.17,0.27))
+  });
+}
+function buildBushGeometry(){
+  const parts=[];
+  const lobe=new THREE.IcosahedronGeometry(1,0);
+  const defs=[
+    [0,0.55,0,0.8],[0.55,0.4,0.15,0.55],[-0.5,0.38,-0.1,0.5],[0.1,0.8,0.45,0.4],[-0.15,0.35,0.55,0.46],
+  ];
+  for(const [x,y,z,s] of defs){
+    const m=new THREE.Matrix4().compose(
+      new THREE.Vector3(x,y,z),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(0,3),rand(0,3),rand(0,3))),
+      new THREE.Vector3(s*rand(0.9,1.2),s*rand(0.7,0.95),s*rand(0.9,1.2))
+    );
+    parts.push({geo:lobe,matrix:m});
+  }
+  return mergeGeometryEntries(parts);
+}
+function makeBladeGeometry(w,h,bend){
+  const g=new THREE.BufferGeometry();
+  const hw=w*0.5, tw=w*0.09;
+  const pos=new Float32Array([
+    -hw,0,0,  hw,0,0,  tw,h,bend,
+    -hw,0,0,  tw,h,bend, -tw,h,bend,
+  ]);
+  const nor=new Float32Array(18);
+  for(let i=0;i<6;i++){ nor[i*3]=0; nor[i*3+1]=1; nor[i*3+2]=0; }
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('normal',new THREE.BufferAttribute(nor,3));
+  g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array([0,0,1,0,1,1,0,0,1,1,0,1]),2));
+  return g;
+}
+function buildGrassGeometry(){
+  const parts=[];
+  const blade=makeBladeGeometry(0.075,0.55,0.10);
+  const broad=makeBladeGeometry(0.115,0.38,0.16);
+  const nBlades=14;
+  for(let i=0;i<nBlades;i++){
+    const ang=(i/nBlades)*Math.PI*2+rand(-0.35,0.35);
+    const r=rand(0.02,0.17);
+    const s=rand(0.7,1.15);
+    const m=new THREE.Matrix4().compose(
+      new THREE.Vector3(Math.cos(ang)*r,rand(0.01,0.06),Math.sin(ang)*r),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(-0.18,0.18),ang+rand(-0.7,0.7),rand(-0.28,0.28))),
+      new THREE.Vector3(s,s*rand(0.7,1.2),s)
+    );
+    parts.push({geo:blade,matrix:m});
+  }
+  for(let i=0;i<6;i++){
+    const ang=rand(0,6.28), r=rand(0.05,0.2), s=rand(0.6,1.0);
+    const m=new THREE.Matrix4().compose(
+      new THREE.Vector3(Math.cos(ang)*r,0.01,Math.sin(ang)*r),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(rand(-0.2,0.2),ang,rand(-0.9,0.9))),
+      new THREE.Vector3(s,s*rand(0.5,0.9),s)
+    );
+    parts.push({geo:broad,matrix:m});
+  }
+  return mergeGeometryEntries(parts);
+}
+function buildFlowerHeadGeometry(){
+  const parts=[];
+  const petal=new THREE.IcosahedronGeometry(0.075,0);
+  for(let i=0;i<5;i++){
+    const a=i/5*Math.PI*2;
+    const m=new THREE.Matrix4().compose(
+      new THREE.Vector3(Math.cos(a)*0.075,0.012,Math.sin(a)*0.075),
+      new THREE.Quaternion().setFromEuler(new THREE.Euler(0,-a,0.28)),
+      new THREE.Vector3(1.0,0.38,1.0)
+    );
+    parts.push({geo:petal,matrix:m});
+  }
+  const centre=new THREE.IcosahedronGeometry(0.052,0);
+  parts.push({geo:centre,matrix:new THREE.Matrix4().makeTranslation(0,0.035,0)});
+  return mergeGeometryEntries(parts);
+}
+function buildScatteredVegetation(){
+  const trunkMesh=buildInstancedMesh(TREE_TRUNK_GEO,TREE_TRUNK_MAT,TREE_TRUNK_INSTANCES,{castShadow:true,receiveShadow:true,name:'trees-trunk'});
+  const leafMesh=buildInstancedMesh(TREE_LEAF_GEO,TREE_LEAF_MAT,TREE_LEAF_INSTANCES,{castShadow:true,name:'trees-leaf'});
+  const rockMesh=buildInstancedMesh(ROCK_GEO,ROCK_MAT,ROCK_INSTANCES,{castShadow:true,receiveShadow:true,name:'rocks'});
+  GRASS_GEO=GRASS_GEO||buildGrassGeometry();
+  const grassMesh=buildInstancedMesh(GRASS_GEO,GRASS_MAT,GRASS_INSTANCES,{castShadow:false,frustumCulled:true,name:'grass'});
+  const stemMesh=buildInstancedMesh(new THREE.CylinderGeometry(0.018,0.028,1,4),FLOWER_STEM_MAT,FLOWER_STEM_INSTANCES,{castShadow:false,name:'flower-stems'});
+  const headMesh=buildInstancedMesh(buildFlowerHeadGeometry(),FLOWER_HEAD_MAT,FLOWER_HEAD_INSTANCES,{castShadow:false,name:'flower-heads'});
+  const bushMesh=buildInstancedMesh(buildBushGeometry(),BUSH_MAT,BUSH_INSTANCES,{castShadow:true,receiveShadow:true,name:'bushes'});
+  const pineMesh=buildInstancedMesh(new THREE.ConeGeometry(1,1,7),PINE_MAT,PINE_INSTANCES,{castShadow:true,name:'pines'});
+  if(trunkMesh) scene.add(trunkMesh);
+  if(leafMesh) scene.add(leafMesh);
+  if(rockMesh) scene.add(rockMesh);
+  if(pineMesh) scene.add(pineMesh);
+  if(grassMesh){ grassGroup.add(grassMesh); scene.add(grassGroup); grassMeshRef=grassMesh; }
+  if(stemMesh) scene.add(stemMesh);
+  if(headMesh) scene.add(headMesh);
+  if(bushMesh) scene.add(bushMesh);
+  console.log('[vegetation] trees',TREE_TRUNK_INSTANCES.length,'leaves',TREE_LEAF_INSTANCES.length,'rocks',ROCK_INSTANCES.length,'grass',GRASS_INSTANCES.length,'flowers',FLOWER_HEAD_INSTANCES.length,'bushes',BUSH_INSTANCES.length);
+}
+
+// ---- 驿站 ----
+const stables=[];
+function makeStable(x,z,name){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='stable';
+  const woodMat=toon(0x8a6a4a,{shadowColor:0x3a2a1a,steps:3,rimColor:0xffcc88});
+  const roofMat=toon(0x6a3a2a,{shadowColor:0x2a1a10,steps:3,rimColor:0xff8866});
+  const stoneMat=toon(0x6a6a70,{shadowColor:0x2a2a30,steps:3});
+  const base=new THREE.Mesh(new THREE.BoxGeometry(10,0.6,8),stoneMat);
+  base.position.y=0.3; base.receiveShadow=true; g.add(base);
+  const main=new THREE.Mesh(new THREE.BoxGeometry(8,4,6),woodMat);
+  main.position.y=2.6; main.castShadow=true; main.receiveShadow=true; g.add(main);
+  const roofL=new THREE.Mesh(new THREE.BoxGeometry(5,0.3,7),roofMat);
+  roofL.position.set(-2.4,4.9,0); roofL.rotation.z=0.45; roofL.castShadow=true; g.add(roofL);
+  const roofR=new THREE.Mesh(new THREE.BoxGeometry(5,0.3,7),roofMat);
+  roofR.position.set(2.4,4.9,0); roofR.rotation.z=-0.45; roofR.castShadow=true; g.add(roofR);
+  for(let i=0;i<4;i++){
+    const post=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.15,2.5,5),woodMat);
+    post.position.set(-5+rand(-0.2,0.2),1.5,-4+i*2.5); post.castShadow=true; g.add(post);
+    const post2=new THREE.Mesh(new THREE.CylinderGeometry(0.15,0.15,2.5,5),woodMat);
+    post2.position.set(5+rand(-0.2,0.2),1.5,-4+i*2.5); post2.castShadow=true; g.add(post2);
+  }
+  const railTop=new THREE.Mesh(new THREE.BoxGeometry(10,0.15,0.15),woodMat);
+  railTop.position.set(0,2.4,4); g.add(railTop);
+  const railBot=new THREE.Mesh(new THREE.BoxGeometry(10,0.15,0.15),woodMat);
+  railBot.position.set(0,1.0,4); g.add(railBot);
+  const trough=new THREE.Mesh(new THREE.BoxGeometry(2,0.5,0.8),woodMat);
+  trough.position.set(0,0.6,-3.5); g.add(trough);
+  g.position.set(x,h,z); g.rotation.y=rand(0,Math.PI*2); scene.add(g);
+  stables.push({group:g, pos:new THREE.Vector3(x,h,z), name});
+  pushCollidable(x,z,6,'stable',5.2,true);
+  mergeStaticGroup(g);
+}
+
+// ---- 希卡塔 ----
+const towers=[];
+function makeTower(x,z,name){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='tower';
+  const stoneMat=toon(0x4a4a52,{shadowColor:0x1a1a22,steps:3,rimColor:0x88aaff});
+  const metalMat=toon(0x8a8a92,{shadowColor:0x3a3a42,steps:4,rimColor:0xccddff,rimPower:2.5});
+  const glowMat=new THREE.MeshStandardMaterial({color:0xffaa44,emissive:0xff7722,emissiveIntensity:1.5});
+  const base=new THREE.Mesh(new THREE.CylinderGeometry(4,5,3,8),stoneMat);
+  base.position.y=1.5; base.receiveShadow=true; base.castShadow=true; g.add(base);
+  const shaft=new THREE.Mesh(new THREE.CylinderGeometry(2.2,2.8,32,8),stoneMat);
+  shaft.position.y=17; shaft.castShadow=true; shaft.receiveShadow=true; g.add(shaft);
+  for(let i=0;i<5;i++){
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(2.4,0.2,6,16),metalMat);
+    ring.rotation.x=Math.PI/2; ring.position.y=6+i*6; g.add(ring);
+  }
+  const top=new THREE.Mesh(new THREE.CylinderGeometry(3,3,0.8,8),stoneMat);
+  top.position.y=33.4; top.castShadow=true; g.add(top);
+  const eye=new THREE.Mesh(new THREE.SphereGeometry(0.6,8,6),glowMat);
+  eye.position.y=34.4; eye.userData.noMerge=true; g.add(eye);
+  const eyeRing=new THREE.Mesh(new THREE.TorusGeometry(1.0,0.12,6,20),glowMat);
+  eyeRing.rotation.x=Math.PI/2; eyeRing.position.y=34.4; eyeRing.userData.noMerge=true; g.add(eyeRing);
+  // four floating Sheikah brackets orbiting the terminal
+  for(let i=0;i<4;i++){
+    const a=i/4*Math.PI*2;
+    const bracket=new THREE.Mesh(new THREE.TorusGeometry(2.9,0.07,4,18,Math.PI*0.55),metalMat);
+    bracket.rotation.x=Math.PI/2; bracket.rotation.z=a; bracket.position.y=32.6;
+    bracket.userData.noMerge=true; g.add(bracket);
+  }
+  const beamMat=new THREE.MeshBasicMaterial({color:0x66ddff,transparent:true,opacity:0.32,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide});
+  const beam=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.62,48,10,1,true),beamMat);
+  beam.position.y=57; beam.visible=false; g.add(beam);
+  const beaconMat=new THREE.MeshBasicMaterial({color:0x8fe8ff,transparent:true,opacity:0.8,depthWrite:false,blending:THREE.AdditiveBlending});
+  const beacon=new THREE.Mesh(new THREE.RingGeometry(2.8,3.5,28),beaconMat);
+  beacon.rotation.x=-Math.PI/2; beacon.position.y=34.9; beacon.visible=false; g.add(beacon);
+  g.position.set(x,h,z); scene.add(g);
+  const tower={group:g, pos:new THREE.Vector3(x,h,z), name, activated:false, eye, eyeRing, glowMat, beam, beacon};
+  towers.push(tower);
+  pushCollidable(x,z,2.8,'tower',34.5,true);
+  mergeStaticGroup(g);
+}
+function activateTower(t, silent){
+  if(!t||t.activated) return;
+  t.activated=true;
+  t.glowMat.color.setHex(0x66ddff); t.glowMat.emissive.setHex(0x2299ff); t.glowMat.emissiveIntensity=2.3;
+  t.beam.visible=true; t.beacon.visible=true;
+  playTeleportFX(t.pos.clone().add(new THREE.Vector3(0,3,0)),0x66ddff,2.2);
+  SFX.shrineSolve(); toast((silent?'':'希卡塔启动 · ')+t.name);
+  if(!silent){
+    player.maxStamina=Math.min(3,player.maxStamina+0.25);
+    updateQuestHUD();
+    try{ submitRecordIfBetter('shrines',shrines.filter(x=>x.activated).length); }catch(e){}
+  }
+}
+
+// ---- 桥 ----
+function makeBridge(x,z,angle=0,name='桥'){
+  const g=new THREE.Group(); g.name='bridge';
+  const woodMat=toon(0x6a4a2a,{shadowColor:0x2a1a0a,steps:3});
+  const stoneMat=toon(0x6a6a70,{shadowColor:0x2a2a30,steps:3});
+  const deck=new THREE.Mesh(new THREE.BoxGeometry(22,0.4,4),woodMat);
+  deck.position.y=WATER_LEVEL+2.5; deck.receiveShadow=true; g.add(deck);
+  for(const s of [-1,1]){
+    const rail=new THREE.Mesh(new THREE.BoxGeometry(22,0.15,0.15),woodMat);
+    rail.position.set(0,WATER_LEVEL+3.6,s*1.9); g.add(rail);
+    const rail2=new THREE.Mesh(new THREE.BoxGeometry(22,0.15,0.15),woodMat);
+    rail2.position.set(0,WATER_LEVEL+2.9,s*1.9); g.add(rail2);
+    for(let i=0;i<5;i++){
+      const post=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,1.2,5),woodMat);
+      post.position.set(-11+i*5.5, WATER_LEVEL+3.0, s*1.9); g.add(post);
+    }
+  }
+  for(const s of [-1,1]){
+    const pier=new THREE.Mesh(new THREE.CylinderGeometry(0.8,1.0,4,6),stoneMat);
+    pier.position.set(s*8, WATER_LEVEL-0.5, 0); g.add(pier);
+  }
+  g.position.set(x,0,z); g.rotation.y=angle;
+  scene.add(g);
+  walkSurfaces.push({x,z,y:WATER_LEVEL+2.72,halfL:11,halfW:2.15,angle});
+  mergeStaticGroup(g);
+}
+
+// ============================================================
+// 建筑几何体
+// ============================================================
+const GLOW_WIN=new THREE.MeshStandardMaterial({color:0xffdd88,emissive:0xcc8822,emissiveIntensity:0.4,roughness:0.5});
+const GLOW_LAMP=new THREE.MeshStandardMaterial({color:0xffdd88,emissive:0xffaa33,emissiveIntensity:0.8,roughness:0.4});
+
+function makeHouse(x,z,style='normal'){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='house';
+  let wallColor=0xd8c8a8, roofColor=0x8a3a2a, woodColor=0x6a4a2a, stoneColor=0x8a8a90;
+  if(style==='zora'){ wallColor=0x88b8d8; roofColor=0x4a7a9a; woodColor=0x5a7a9a; stoneColor=0x7a9aaa; }
+  else if(style==='goron'){ wallColor=0x8a6a5a; roofColor=0x5a3a2a; woodColor=0x6a4a3a; stoneColor=0x5a5a5a; }
+  else if(style==='gerudo'){ wallColor=0xe0c098; roofColor=0xc87848; woodColor=0x8a6a3a; stoneColor=0xc8a878; }
+  else if(style==='rito'){ wallColor=0xc8d8e8; roofColor=0x6a7a8a; woodColor=0x7a8a9a; stoneColor=0x8a9aaa; }
+  const wallMat=toon(wallColor);
+  const roofMat=toon(roofColor);
+  const woodMat=toon(woodColor);
+  const stoneMat=toon(stoneColor);
+
+  const base=new THREE.Mesh(new THREE.BoxGeometry(5.2,0.5,4.2),stoneMat);
+  base.position.y=0.25; base.castShadow=true; base.receiveShadow=true; g.add(base);
+  const wall=new THREE.Mesh(new THREE.BoxGeometry(4.6,3.2,3.6),wallMat);
+  wall.position.y=2.1; wall.castShadow=true; wall.receiveShadow=true; g.add(wall);
+  for(const sx of [-1,1]) for(const sz of [-1,1]){
+    const beam=new THREE.Mesh(new THREE.BoxGeometry(0.22,3.4,0.22),woodMat);
+    beam.position.set(sx*2.2,2.0,sz*1.7); g.add(beam);
+  }
+  const roofL=new THREE.Mesh(new THREE.BoxGeometry(2.8,0.3,4.2),roofMat);
+  roofL.position.set(-1.15,4.05,0); roofL.rotation.z=0.48; roofL.castShadow=true; g.add(roofL);
+  const roofR=new THREE.Mesh(new THREE.BoxGeometry(2.8,0.3,4.2),roofMat);
+  roofR.position.set(1.15,4.05,0); roofR.rotation.z=-0.48; roofR.castShadow=true; g.add(roofR);
+  const ridge=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.2,4.2),woodMat);
+  ridge.position.y=4.75; g.add(ridge);
+  const door=new THREE.Mesh(new THREE.BoxGeometry(0.9,1.8,0.12),woodMat);
+  door.position.set(0,1.1,1.86); g.add(door);
+  const doorFrame=new THREE.Mesh(new THREE.BoxGeometry(1.1,2.0,0.06),stoneMat);
+  doorFrame.position.set(0,1.1,1.83); g.add(doorFrame);
+  for(const s of [-1,1]){
+    const win=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.7,0.1),GLOW_WIN);
+    win.position.set(s*1.3,2.4,1.83); g.add(win);
+    const winFrame=new THREE.Mesh(new THREE.BoxGeometry(0.85,0.85,0.05),stoneMat);
+    winFrame.position.set(s*1.3,2.4,1.81); g.add(winFrame);
+  }
+  const chimney=new THREE.Mesh(new THREE.BoxGeometry(0.5,1.6,0.5),stoneMat);
+  chimney.position.set(-1.4,4.6,0.8); chimney.castShadow=true; g.add(chimney);
+  const chimTop=new THREE.Mesh(new THREE.BoxGeometry(0.65,0.15,0.65),stoneMat);
+  chimTop.position.set(-1.4,5.45,0.8); g.add(chimTop);
+  if(Math.random()<0.5){
+    const sign=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.4,0.08),woodMat);
+    sign.position.set(1.4,3.1,1.9); g.add(sign);
+  }
+  g.position.set(x,h,z);
+  g.rotation.y=Math.round(rand(0,3))*(Math.PI/2)+rand(-0.2,0.2);
+  scene.add(g);
+  pushCollidable(x,z,3.0,'house',5.6,true);
+  mergeStaticGroup(g);
+}
+
+function makeCastle(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='castle';
+  const stoneMat=toon(0x8a8a92,{shadowColor:0x3a3a42,steps:4,rimColor:0xccddff,rimPower:2.5});
+  const darkStoneMat=toon(0x5a5a62,{shadowColor:0x2a2a32,steps:3});
+  const roofMat=toon(0x3a4a6a,{shadowColor:0x1a2a3a,steps:3,rimColor:0x88aaff});
+  const base=new THREE.Mesh(new THREE.CylinderGeometry(16,18,3,10),darkStoneMat);
+  base.position.y=1.5; base.receiveShadow=true; base.castShadow=true; g.add(base);
+  const mainTower=new THREE.Mesh(new THREE.CylinderGeometry(6,7,32,8),stoneMat);
+  mainTower.position.y=18; mainTower.castShadow=true; mainTower.receiveShadow=true; g.add(mainTower);
+  const spire=new THREE.Mesh(new THREE.ConeGeometry(6.8,12,8),roofMat);
+  spire.position.y=40; spire.castShadow=true; g.add(spire);
+  const topPlatform=new THREE.Mesh(new THREE.CylinderGeometry(6.4,6.4,0.6,8),darkStoneMat);
+  topPlatform.position.y=34.3; g.add(topPlatform);
+  for(let i=0;i<4;i++){
+    const ang=(i/4)*Math.PI*2+Math.PI/4;
+    const px=Math.cos(ang)*13, pz=Math.sin(ang)*13;
+    const tower=new THREE.Mesh(new THREE.CylinderGeometry(2.5,3.2,20,6),stoneMat);
+    tower.position.set(px,10,pz); tower.castShadow=true; g.add(tower);
+    const tSpire=new THREE.Mesh(new THREE.ConeGeometry(3.2,7,6),roofMat);
+    tSpire.position.set(px,23.5,pz); tSpire.castShadow=true; g.add(tSpire);
+  }
+  for(let i=0;i<10;i++){
+    const ang=(i/10)*Math.PI*2;
+    if(Math.abs(ang-Math.PI/2)<0.3) continue;
+    const wSeg=new THREE.Mesh(new THREE.BoxGeometry(6.5,5,1.4),darkStoneMat);
+    wSeg.position.set(Math.cos(ang)*22, 2.5, Math.sin(ang)*22);
+    wSeg.rotation.y=-ang; wSeg.castShadow=true; wSeg.receiveShadow=true; g.add(wSeg);
+    for(const s of [-1,1]){
+      const merlon=new THREE.Mesh(new THREE.BoxGeometry(0.9,1.2,1.4),darkStoneMat);
+      merlon.position.set(Math.cos(ang)*22+Math.cos(ang+Math.PI/2)*s*2.3, 5.6, Math.sin(ang)*22+Math.sin(ang+Math.PI/2)*s*2.3);
+      g.add(merlon);
+    }
+  }
+  const gateL=new THREE.Mesh(new THREE.BoxGeometry(1.2,6.5,1.6),stoneMat);
+  gateL.position.set(-3.2,3.2,22); g.add(gateL);
+  const gateR=new THREE.Mesh(new THREE.BoxGeometry(1.2,6.5,1.6),stoneMat);
+  gateR.position.set(3.2,3.2,22); g.add(gateR);
+  const gateTop=new THREE.Mesh(new THREE.BoxGeometry(7.6,2,1.8),stoneMat);
+  gateTop.position.set(0,7.2,22); g.add(gateTop);
+  const gateArch=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,1.8,12,1,false,0,Math.PI),stoneMat);
+  gateArch.rotation.z=Math.PI/2; gateArch.rotation.y=Math.PI/2; gateArch.position.set(0,5.2,22); g.add(gateArch);
+  const beam=new THREE.Mesh(new THREE.CylinderGeometry(0.6,4,25,12,1,true),
+    new THREE.MeshBasicMaterial({color:0xdd3366,transparent:true,opacity:0.28,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+  beam.position.y=52; g.add(beam);
+  for(let i=0;i<4;i++){
+    const ang=(i/4)*Math.PI*2+Math.PI/4;
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,3,5),darkStoneMat);
+    pole.position.set(Math.cos(ang)*13, 21.5, Math.sin(ang)*13); g.add(pole);
+    const flag=new THREE.Mesh(new THREE.PlaneGeometry(1.6,1.0),new THREE.MeshStandardMaterial({color:0xcc2233,side:THREE.DoubleSide,roughness:0.8}));
+    flag.position.set(Math.cos(ang)*13+0.8, 22.5, Math.sin(ang)*13);
+    flag.rotation.y=-ang; g.add(flag);
+  }
+  g.scale.set(1.35,1.35,1.35);
+  g.position.set(x,h-2,z); scene.add(g);
+  // distant malice aura so the castle reads on the horizon
+  const auraMat=new THREE.MeshBasicMaterial({color:0xcc2255,transparent:true,opacity:0.16,side:THREE.BackSide,depthWrite:false,blending:THREE.AdditiveBlending});
+  const aura=new THREE.Mesh(new THREE.SphereGeometry(28,16,12),auraMat);
+  aura.position.set(0,24,0); g.add(aura);
+  pushCollidable(x,z,9,'castle',56,true);
+  mergeStaticGroup(g);
+}
+
+// ---- 时之神殿 / 海拉鲁平原遗迹 ----
+function makeGoddessStatue(x,z,parent,localY){
+  const g=new THREE.Group();
+  const stone=toon(0xd8d2c2,{shadowColor:0x6a6458,steps:4,rimColor:0xffffff});
+  const trim=toon(0xb8ac8a,{shadowColor:0x5a5038,steps:3,rimColor:0xffe8b0});
+  const plinth=new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.3,0.8,8),trim); plinth.position.y=0.4; g.add(plinth);
+  const robe=new THREE.Mesh(new THREE.ConeGeometry(0.75,2.3,9),stone); robe.position.y=1.85; robe.castShadow=true; g.add(robe);
+  const chest=new THREE.Mesh(new THREE.SphereGeometry(0.58,10,8),stone); chest.position.y=2.75; chest.scale.set(1.0,1.25,0.7); g.add(chest);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.34,10,8),stone); head.position.y=3.55; g.add(head);
+  const veil=new THREE.Mesh(new THREE.ConeGeometry(0.42,1.05,8),stone); veil.position.y=3.88; g.add(veil);
+  for(const s of [-1,1]){
+    const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.16,1.5,6),stone);
+    arm.position.set(s*0.55,2.55,0.18); arm.rotation.z=s*0.62; arm.rotation.x=-0.25; g.add(arm);
+    const hand=new THREE.Mesh(new THREE.SphereGeometry(0.14,6,5),stone); hand.position.set(s*0.95,1.95,0.47); g.add(hand);
+  }
+  const halo=new THREE.Mesh(new THREE.TorusGeometry(0.52,0.035,5,22),
+    new THREE.MeshStandardMaterial({color:0xffe9a8,emissive:0xffcc66,emissiveIntensity:1.3,roughness:0.25}));
+  halo.position.set(0,3.55,-0.28); g.add(halo);
+  const rune=new THREE.Mesh(new THREE.RingGeometry(0.16,0.33,6),
+    new THREE.MeshBasicMaterial({color:0xffe2a0,transparent:true,opacity:0.8,side:THREE.DoubleSide,blending:THREE.AdditiveBlending,depthWrite:false}));
+  rune.rotation.x=-Math.PI/2; rune.position.y=0.84; g.add(rune);
+  g.position.set(x,localY||0,z);
+  if(parent) parent.add(g); else { g.position.set(x,terrainHeight(x,z),z); scene.add(g); }
+  const world=g.getWorldPosition(new THREE.Vector3());
+  const rec={group:g, pos:world, used:false, halo, rune};
+  goddessStatues.push(rec);
+  return rec;
+}
+
+function makeTempleOfTime(x,z){
+  const g=new THREE.Group(); g.name='temple-of-time';
+  const stone=toon(0xa8a89a,{shadowColor:0x4a4a42,steps:4,rimColor:0xe8f0e0,rimPower:2.2});
+  const stoneDark=toon(0x777268,{shadowColor:0x302e28,steps:3});
+  const moss=toon(0x5a7440,{shadowColor:0x26361a,steps:3});
+  const gold=toon(0xb89a56,{shadowColor:0x4a3a18,steps:3,rimColor:0xffe9a0,emissive:0x2a1a00,emissiveIntensity:0.2});
+  let maxH=terrainHeight(x,z);
+  for(const [dx,dz] of [[-14,-10],[14,-10],[-14,10],[14,10],[0,0],[-14,0],[14,0]]) maxH=Math.max(maxH,terrainHeight(x+dx,z+dz));
+  const baseY=maxH+0.4;
+  // stepped foundation
+  for(let t=0;t<3;t++){
+    const size=30-t*3.5, depth=21-t*2.4;
+    const step=new THREE.Mesh(new THREE.BoxGeometry(size,0.6,depth),t===2?stoneDark:stone);
+    step.position.y=0.3+t*0.58; step.receiveShadow=true; step.castShadow=true; g.add(step);
+  }
+  const floorY=1.75;
+  // column pairs down both sides
+  for(let i=0;i<4;i++){
+    for(const sx of [-1,1]){
+      const px=sx*11.5, pz=-7.5+i*5.0;
+      const broken=(i===0&&sx>0)||(i===3&&sx<0);
+      const colH=broken?rand(3.5,6.0):13.2;
+      const base=new THREE.Mesh(new THREE.BoxGeometry(1.7,0.8,1.7),stoneDark);
+      base.position.set(px,floorY+0.4,pz); base.castShadow=true; g.add(base);
+      const col=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.65,colH,10),stone);
+      col.position.set(px,floorY+0.8+colH/2,pz); col.castShadow=true; col.receiveShadow=true; g.add(col);
+      for(let r=0;r<3;r++){
+        const ring=new THREE.Mesh(new THREE.TorusGeometry(0.58,0.055,5,14),gold);
+        ring.rotation.x=Math.PI/2; ring.position.set(px,floorY+1.5+r*(colH*0.28),pz); g.add(ring);
+      }
+      if(!broken){
+        const cap=new THREE.Mesh(new THREE.BoxGeometry(1.9,0.55,1.9),stone);
+        cap.position.set(px,floorY+0.8+colH+0.25,pz); cap.castShadow=true; g.add(cap);
+      } else {
+        const rubble=new THREE.Mesh(new THREE.DodecahedronGeometry(0.9,0),stoneDark);
+        rubble.position.set(px+rand(-1,1),floorY+0.6,pz+rand(-1,1)); rubble.scale.y=0.55; g.add(rubble);
+      }
+      if(!broken) pushCollidable(x+px,z+pz,0.75,'temple',colH,true);
+    }
+  }
+  // rear wall + rose window
+  const backWall=new THREE.Mesh(new THREE.BoxGeometry(23,12,1.3),stone);
+  backWall.position.set(0,floorY+6,-9.8); backWall.castShadow=true; backWall.receiveShadow=true; g.add(backWall);
+  const windowGroup=new THREE.Group(); windowGroup.position.set(0,floorY+7.1,-9.0);
+  const glassCols=[0x66aaff,0xffcc66,0xff6688,0x88ffcc];
+  for(let i=0;i<8;i++){
+    const a=i/8*Math.PI*2;
+    const pane=new THREE.Mesh(new THREE.CircleGeometry(0.78,3),
+      new THREE.MeshStandardMaterial({color:glassCols[i%4],emissive:glassCols[i%4],emissiveIntensity:0.8,transparent:true,opacity:0.72,side:THREE.DoubleSide,roughness:0.2}));
+    pane.position.set(Math.cos(a)*1.3,Math.sin(a)*1.3,0.1); pane.rotation.z=a-Math.PI/2; windowGroup.add(pane);
+  }
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(2.3,0.16,6,30),gold); windowGroup.add(ring);
+  const heart=new THREE.Mesh(new THREE.CircleGeometry(0.62,6),
+    new THREE.MeshBasicMaterial({color:0xffe6a8,transparent:true,opacity:0.9,side:THREE.DoubleSide})); heart.position.z=0.12; windowGroup.add(heart);
+  g.add(windowGroup);
+  // roof beams / broken roof
+  for(let i=0;i<4;i++){
+    if(i===2) continue;
+    const beam=new THREE.Mesh(new THREE.BoxGeometry(23,0.7,1.0),stoneDark);
+    beam.position.set(0,floorY+13.6,-7.7+i*4.8); beam.rotation.z=rand(-0.012,0.012); beam.castShadow=true; g.add(beam);
+  }
+  for(const sx of [-1,1]){
+    const sideRoof=new THREE.Mesh(new THREE.BoxGeometry(6.5,0.5,18),stoneDark);
+    sideRoof.position.set(sx*13.2,floorY+12.6,-1.5); sideRoof.rotation.z=sx*0.3; sideRoof.castShadow=true; g.add(sideRoof);
+  }
+  // central altar and goddess statue
+  const altar=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.9,1.1,8),stoneDark);
+  altar.position.set(0,floorY+0.55,-4); altar.castShadow=true; g.add(altar);
+  makeGoddessStatue(0,-4,g,floorY+1.1);
+  // moss and rubble
+  for(let i=0;i<20;i++){
+    const a=rand(0,6.28), r=rand(4,13);
+    const mossChunk=new THREE.Mesh(new THREE.IcosahedronGeometry(rand(0.3,0.8),0),moss);
+    mossChunk.position.set(Math.cos(a)*r,floorY+0.15,Math.sin(a)*r*0.65);
+    mossChunk.scale.y=0.25; g.add(mossChunk);
+  }
+  const candle=new THREE.PointLight(0xffcc88,2.4,30,1.8); candle.position.set(0,floorY+4,-4); g.add(candle);
+  // banners flanking the entrance
+  for(const sx of [-1,1]){
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,10,5),gold);
+    pole.position.set(sx*9.4,floorY+5,7.5); pole.castShadow=true; g.add(pole);
+    const banner=new THREE.Mesh(new THREE.PlaneGeometry(2.0,5.4),
+      new THREE.MeshStandardMaterial({color:0x2a5a9a,side:THREE.DoubleSide,roughness:0.85}));
+    banner.position.set(sx*9.4,floorY+5.6,7.45); banner.rotation.y=Math.PI; g.add(banner);
+  }
+  // front steps
+  for(let i=0;i<3;i++){
+    const step=new THREE.Mesh(new THREE.BoxGeometry(13-i*2,0.35,2.0),stone);
+    step.position.set(0,floorY-0.2-i*0.5,11.5+i*1.4); step.receiveShadow=true; g.add(step);
+  }
+  // triangular pediment over the entrance — the classic Temple of Time silhouette
+  const pedShape=new THREE.Shape();
+  pedShape.moveTo(-11.5,0); pedShape.lineTo(11.5,0); pedShape.lineTo(0,6.2); pedShape.closePath();
+  const pedGeo=new THREE.ExtrudeGeometry(pedShape,{depth:1.3,bevelEnabled:false});
+  const pediment=new THREE.Mesh(pedGeo,stone);
+  pediment.position.set(0,floorY+13.2,7.4); pediment.castShadow=true; pediment.receiveShadow=true; g.add(pediment);
+  const tympanum=new THREE.Mesh(new THREE.CircleGeometry(1.3,12),
+    new THREE.MeshStandardMaterial({color:0x6a9ad8,emissive:0x2a5a9a,emissiveIntensity:0.6,roughness:0.3,metalness:0.3}));
+  tympanum.position.set(0,floorY+15.4,8.78); g.add(tympanum);
+  const triGold=new THREE.Mesh(new THREE.TorusGeometry(1.5,0.07,5,3),gold);
+  triGold.position.set(0,floorY+15.4,8.82); triGold.rotation.z=Math.PI/2; g.add(triGold);
+  const frieze=new THREE.Mesh(new THREE.BoxGeometry(23.4,0.45,1.4),gold);
+  frieze.position.set(0,floorY+13.05,8.05); g.add(frieze);
+  // flanking broken towers
+  for(const sx of [-1,1]){
+    const tower=new THREE.Mesh(new THREE.CylinderGeometry(2.0,2.5,17,8),stone);
+    tower.position.set(sx*14.6,floorY+8.5,-7.5); tower.castShadow=true; g.add(tower);
+    const towerTop=new THREE.Mesh(new THREE.ConeGeometry(2.4,4.0,8),stoneDark);
+    towerTop.position.set(sx*14.6,floorY+17.2,-7.5); towerTop.castShadow=true; g.add(towerTop);
+    const lantern=new THREE.Mesh(new THREE.SphereGeometry(0.42,8,6),
+      new THREE.MeshStandardMaterial({color:0x88ddff,emissive:0x2288cc,emissiveIntensity:1.6,roughness:0.2}));
+    lantern.position.set(sx*14.6,floorY+8.5,5.35); g.add(lantern);
+  }
+  g.position.set(x,baseY,z); scene.add(g);
+  walkSurfaces.push({x,z,y:baseY+1.8,halfL:14.5,halfW:10.2,angle:0});
+  walkSurfaces.push({x,z:z+12.5,y:baseY+0.75,halfL:6.5,halfW:2.2,angle:0});
+  mergeStaticGroup(g);
+  g.updateMatrixWorld(true);
+  const st=goddessStatues[goddessStatues.length-1];
+  if(st&&st.group) st.group.getWorldPosition(st.pos);
+  try{ makeRuins(x+24,z+14); makeRuins(x-26,z+8); }catch(e){}
+  return {group:g,pos:new THREE.Vector3(x,baseY,z)};
+}
+
+// ---- 可进入的程序化洞穴 ----
+function makeCave(x,z,name,angle=0,danger=1){
+  const g=new THREE.Group(); g.name='cave';
+  g.rotation.y=angle;
+  const rockMat=toon(0x6c675e,{shadowColor:0x2a2822,steps:3,rimColor:0x8a8878});
+  const rockDark=toon(0x4a463e,{shadowColor:0x1a1814,steps:2});
+  const mossMat=toon(0x4f6834,{shadowColor:0x1e2c12,steps:2});
+  let floorY=terrainHeight(x,z);
+  for(let i=0;i<12;i++){
+    const a=i/12*Math.PI*2;
+    floorY=Math.max(floorY,terrainHeight(x+Math.cos(a)*7,z+Math.sin(a)*7));
+  }
+  floorY+=0.15;
+  const floor=new THREE.Mesh(new THREE.CylinderGeometry(8.2,8.8,0.8,16),rockDark);
+  floor.position.y=-0.15; floor.receiveShadow=true; floor.castShadow=true; g.add(floor);
+  // entrance threshold and rock arch
+  for(let i=0;i<14;i++){
+    const a=(i/14)*Math.PI*2;
+    const opening=Math.abs(((a%(Math.PI*2))+Math.PI*2)%(Math.PI*2)-Math.PI/2)<0.55;
+    if(opening) continue;
+    const rr=8.0;
+    const px=Math.cos(a)*rr, pz=Math.sin(a)*rr;
+    const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(rand(1.5,2.6),0),rockMat);
+    rock.position.set(px,rand(0.8,3.2),pz);
+    rock.scale.set(rand(1.1,1.8),rand(1.1,2.1),rand(1.1,1.8));
+    rock.rotation.set(rand(0,3),rand(0,3),rand(0,3));
+    rock.castShadow=true; rock.receiveShadow=true; g.add(rock);
+    if(Math.abs(a-Math.PI/2)>0.9) pushCollidable(x+Math.cos(angle)*px+Math.sin(angle)*pz, z-Math.sin(angle)*px+Math.cos(angle)*pz, 1.65,'cave',4.2,true);
+  }
+  // roof slabs, leaving the mouth open
+  for(let i=0;i<18;i++){
+    const a=rand(0,6.28), r=rand(0,6.5);
+    const slab=new THREE.Mesh(new THREE.DodecahedronGeometry(rand(1.6,3.1),0),i%3===0?rockDark:rockMat);
+    slab.position.set(Math.cos(a)*r,rand(5.0,7.6),Math.sin(a)*r);
+    slab.scale.set(rand(1.2,2.2),rand(0.55,1.0),rand(1.2,2.2));
+    slab.rotation.set(rand(0,3),rand(0,3),rand(0,3));
+    slab.castShadow=true; g.add(slab);
+  }
+  // arch mouth pillars
+  for(const sx of [-1,1]){
+    const pillar=new THREE.Mesh(new THREE.DodecahedronGeometry(2.4,0),rockMat);
+    pillar.position.set(sx*4.2,1.8,7.0); pillar.scale.set(1.0,2.0,1.2); pillar.castShadow=true; g.add(pillar);
+    const moss=new THREE.Mesh(new THREE.IcosahedronGeometry(1.1,0),mossMat);
+    moss.position.set(sx*4.2,3.9,6.5); moss.scale.y=0.4; g.add(moss);
+  }
+  const lintel=new THREE.Mesh(new THREE.BoxGeometry(10.5,1.3,1.7),rockDark);
+  lintel.position.set(0,5.2,6.9); lintel.rotation.z=0.04; lintel.castShadow=true; g.add(lintel);
+  // interior stalagmites
+  for(let i=0;i<11;i++){
+    const a=rand(0,6.28), r=rand(3.6,7.0);
+    const spike=new THREE.Mesh(new THREE.ConeGeometry(rand(0.25,0.6),rand(1.0,3.2),5),rockDark);
+    spike.position.set(Math.cos(a)*r,rand(0.4,1.2),Math.sin(a)*r); spike.castShadow=true; g.add(spike);
+    if(Math.random()<0.4){
+      const drip=new THREE.Mesh(new THREE.ConeGeometry(rand(0.15,0.4),rand(0.8,2.2),5),rockDark);
+      drip.position.set(Math.cos(a)*r,rand(4.0,5.6),Math.sin(a)*r); drip.rotation.z=Math.PI; g.add(drip);
+    }
+  }
+  // crystal cluster (lootable)
+  const oreCols=[0x66ddff,0xffaa44,0xaa88ff];
+  for(let i=0;i<3;i++){
+    const a=-1.0+i*0.8, rr=5.2;
+    const ox=Math.cos(a)*rr, oz=Math.sin(a)*rr;
+    const col=oreCols[randInt(0,oreCols.length-1)];
+    const mat=new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:1.35,roughness:0.2,metalness:0.15,transparent:true,opacity:0.9});
+    const cluster=new THREE.Group();
+    for(let k=0;k<5;k++){
+      const shard=new THREE.Mesh(new THREE.ConeGeometry(rand(0.12,0.28),rand(0.6,1.8),5),mat);
+      shard.position.set(rand(-0.5,0.5),rand(0.3,0.9),rand(-0.5,0.5));
+      shard.rotation.z=rand(-0.5,0.5); shard.rotation.x=rand(-0.5,0.5);
+      cluster.add(shard);
+    }
+    cluster.position.set(ox,0.4,oz); g.add(cluster);
+    caveOres.push({pos:new THREE.Vector3(x+Math.cos(angle)*ox+Math.sin(angle)*oz,floorY+0.8,z-Math.sin(angle)*ox+Math.cos(angle)*oz),group:cluster,collected:false,color:col,caveName:name});
+  }
+  // warm central fire bowl + light
+  const brazier=new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.8,0.45,8),rockDark);
+  brazier.position.set(0,0.3,0); g.add(brazier);
+  const ember=new THREE.Mesh(new THREE.IcosahedronGeometry(0.35,0),new THREE.MeshBasicMaterial({color:0xff8844}));
+  ember.position.set(0,0.75,0); g.add(ember);
+  // Emissive flame materials carry the cave lighting; avoid global point-light cost.
+  // ground: stone + cave soil
+  for(let i=0;i<14;i++){
+    const a=rand(0,6.28), r=rand(1,7);
+    const peb=new THREE.Mesh(new THREE.DodecahedronGeometry(rand(0.12,0.4),0),rockDark);
+    peb.position.set(Math.cos(a)*r,0.18,Math.sin(a)*r); peb.rotation.set(rand(0,3),rand(0,3),0); g.add(peb);
+  }
+  g.position.set(x,floorY,z); scene.add(g);
+  mergeStaticGroup(g);
+  const cave={group:g,pos:new THREE.Vector3(x,floorY,z),name,angle,danger,floorY,ores:[]};
+  caves.push(cave);
+  walkSurfaces.push({x,z,y:floorY+0.05,halfL:7.2,halfW:7.2,angle:angle});
+  return cave;
+}
+
+function makePath(points,width=3.2,name='path'){
+  const verts=[], cols=[], idx=[];
+  const cDirt=new THREE.Color(0xa88658);
+  const cDirtDark=new THREE.Color(0x7a5f3e);
+  const cGrass=new THREE.Color(0x7f7c4a);
+  let vi=0;
+  const segs=[];
+  for(let i=0;i<points.length-1;i++){
+    const a=points[i], b=points[i+1];
+    const len=Math.hypot(b[0]-a[0],b[1]-a[1]);
+    const n=Math.max(2,Math.ceil(len/2.4));
+    for(let j=0;j<n;j++){
+      const t=j/n;
+      segs.push({
+        x:lerp(a[0],b[0],t), z:lerp(a[1],b[1],t),
+        tx:(b[0]-a[0])/len, tz:(b[1]-a[1])/len,
+        n:i*1000+j
+      });
+    }
+  }
+  segs.push({x:points[points.length-1][0],z:points[points.length-1][1],
+    tx:(points[points.length-1][0]-points[points.length-2][0])||0,
+    tz:(points[points.length-1][1]-points[points.length-2][1])||1,n:99999});
+  for(let i=0;i<segs.length;i++){
+    const s=segs[i];
+    const nx=-s.tz, nz=s.tx;
+    const wobble=0.82+hash2(s.x*0.13,s.z*0.17)*0.34;
+    const w=width*0.5*wobble;
+    for(const side of [-1,1]){
+      const x=s.x+nx*w*side, z=s.z+nz*w*side;
+      const y=terrainHeight(x,z)+0.10+hash2(x*0.7,z*0.7)*0.03;
+      verts.push(x,y,z);
+      const t=hash2(x*0.31,z*0.29);
+      const c=cDirt.clone().lerp(cDirtDark,t*0.6);
+      if(side>0) c.lerp(cGrass,0.25*(1-wobble));
+      cols.push(c.r,c.g,c.b);
+    }
+    if(i>0){
+      const a=vi, b=vi+1, c=vi-2, d=vi-1;
+      idx.push(c,a,b, c,b,d);
+    }
+    vi+=2;
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(cols,3));
+  geo.setIndex(idx); geo.computeVertexNormals();
+  const mat=new THREE.MeshStandardMaterial({vertexColors:true,roughness:1,metalness:0,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1.2,polygonOffsetUnits:-1});
+  const mesh=new THREE.Mesh(geo,mat); mesh.name=name; mesh.receiveShadow=true; scene.add(mesh);
+  return mesh;
+}
+
+// ---- 四神兽：可远眺的程序化巨兽 ----
+const divineBeasts=[];
+function makeDivineBeast(id,x,z,floatY){
+  const cfg={
+    water:{main:0x3a6f8f,dark:0x1c3444,accent:0x77ddff,glow:0x44ccff,name:'瓦·露塔'},
+    fire:{main:0x7a3424,dark:0x2e1610,accent:0xff8a3a,glow:0xff6622,name:'瓦·鲁达尼亚'},
+    wind:{main:0x7a8470,dark:0x343b32,accent:0xc8e8c8,glow:0x88ffbb,name:'瓦·梅德'},
+    thunder:{main:0x8a7430,dark:0x332a12,accent:0xffdd66,glow:0xffcc33,name:'瓦·纳波利斯'},
+  }[id]||{main:0x555577,dark:0x222233,accent:0xaaaacc,glow:0x8888ff,name:'神兽'};
+  const root=new THREE.Group(); root.name='divine-beast-'+id;
+  const staticGroup=new THREE.Group(); root.add(staticGroup);
+  const bodyMat=toon(cfg.main,{shadowColor:cfg.dark,steps:3,rimColor:cfg.accent,rimPower:2.2});
+  const darkMat=toon(cfg.dark,{shadowColor:0x08080a,steps:3,rimColor:cfg.accent});
+  const metalMat=toon(0xa8b0b8,{shadowColor:0x3a4248,steps:4,rimColor:0xffffff});
+  const glowMat=new THREE.MeshStandardMaterial({color:cfg.glow,emissive:cfg.glow,emissiveIntensity:2.4,roughness:0.18,metalness:0.2});
+  const m=(geo,mat,cast=true)=>{ const mesh=new THREE.Mesh(geo,mat); mesh.castShadow=cast; return mesh; };
+  let animated={core:null,wingL:null,wingR:null,trunk:null,tail:null,neck:null,jaw:null,rotor:null};
+  const h=terrainHeight(x,z);
+
+  if(id==='water'){
+    const body=m(new THREE.SphereGeometry(1,16,12),bodyMat); body.position.y=9; body.scale.set(8.5,5.6,13); staticGroup.add(body);
+    const back=m(new THREE.BoxGeometry(9,1.2,13),darkMat); back.position.y=12.2; staticGroup.add(back);
+    for(const [sx,sz] of [[-6,-6],[6,-6],[-6,6],[6,6]]){
+      const leg=m(new THREE.CylinderGeometry(1.4,2.1,9,8),bodyMat); leg.position.set(sx,4.6,sz); leg.rotation.z=sx*0.035; staticGroup.add(leg);
+      const foot=m(new THREE.CylinderGeometry(2.2,2.6,1.4,8),darkMat); foot.position.set(sx,0.8,sz); staticGroup.add(foot);
+    }
+    const head=m(new THREE.SphereGeometry(1,14,10),bodyMat); head.position.set(0,11.4,13.5); head.scale.set(4.6,3.8,5.4); staticGroup.add(head);
+    const eye=m(new THREE.SphereGeometry(1.15,10,8),glowMat); eye.position.set(0,12.5,17.6); staticGroup.add(eye);
+    for(const s of [-1,1]){
+      const tusk=m(new THREE.ConeGeometry(0.45,5.5,7),metalMat); tusk.position.set(s*2.7,9.7,18.4); tusk.rotation.x=1.35; tusk.rotation.z=s*0.15; staticGroup.add(tusk);
+    }
+    const trunkRoot=new THREE.Group(); trunkRoot.position.set(0,10.2,18.2); root.add(trunkRoot); trunkRoot.userData.noMerge=true;
+    let prev=trunkRoot;
+    for(let i=0;i<7;i++){
+      const seg=new THREE.Group(); seg.position.y=i?1.75:0; prev.add(seg);
+      const tm=m(new THREE.CylinderGeometry(1.05-i*0.08,1.28-i*0.08,1.8,8),bodyMat); tm.position.y=0.9; seg.add(tm);
+      seg.rotation.x=0.12+(i>4?0.26:0);
+      prev=seg;
+    }
+    animated.trunk=trunkRoot;
+    const core=new THREE.Mesh(new THREE.IcosahedronGeometry(2.0,1),glowMat); core.position.set(0,14.0,2.5); staticGroup.add(core); animated.core=core;
+    const ring=m(new THREE.TorusGeometry(3.2,0.12,6,28),metalMat); ring.rotation.x=Math.PI/2; ring.position.set(0,13.4,2.5); staticGroup.add(ring);
+    const beam=new THREE.Mesh(new THREE.CylinderGeometry(0.4,2.6,30,12,1,true),new THREE.MeshBasicMaterial({color:cfg.glow,transparent:true,opacity:0.16,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+    beam.position.set(0,29,2.5); staticGroup.add(beam);
+  } else if(id==='fire'){
+    const body=m(new THREE.SphereGeometry(1,14,10),bodyMat); body.position.y=6.2; body.scale.set(5.4,4.2,10); staticGroup.add(body);
+    const back=m(new THREE.BoxGeometry(4,1.6,10),darkMat); back.position.y=9.0; staticGroup.add(back);
+    for(const [sx,sz] of [[-4,-6],[4,-6],[-4,5],[4,5]]){
+      const leg=m(new THREE.CylinderGeometry(0.95,1.7,6.0,7),bodyMat); leg.position.set(sx,3.1,sz); staticGroup.add(leg);
+      const foot=m(new THREE.BoxGeometry(2.4,0.8,3.0),darkMat); foot.position.set(sx,0.4,sz+0.4); staticGroup.add(foot);
+    }
+    const neckRoot=new THREE.Group(); neckRoot.position.set(0,7.8,9); root.add(neckRoot);
+    const neck=m(new THREE.CylinderGeometry(1.2,1.8,4.2,8),bodyMat); neck.position.y=1.4; neck.rotation.x=-0.4; neckRoot.add(neck);
+    const head=new THREE.Group(); head.position.set(0,3.2,2.5); neckRoot.add(head);
+    const skull=m(new THREE.SphereGeometry(1,12,9),bodyMat); skull.scale.set(2.4,1.8,3.4); head.add(skull);
+    const jaw=m(new THREE.BoxGeometry(3.4,0.7,4.2),darkMat); jaw.position.set(0,-1.3,1.5); head.add(jaw); animated.jaw=jaw;
+    for(const s of [-1,1]){
+      const horn=m(new THREE.ConeGeometry(0.35,2.4,5),metalMat); horn.position.set(s*1.6,1.6,-1.4); horn.rotation.x=-0.5; head.add(horn);
+      const eye=new THREE.Mesh(new THREE.SphereGeometry(0.3,7,5),glowMat); eye.position.set(s*1.3,0.3,2.8); head.add(eye);
+    }
+    animated.neck=neckRoot;
+    const tailRoot=new THREE.Group(); tailRoot.position.set(0,6.2,-9); root.add(tailRoot);
+    let prev=tailRoot;
+    for(let i=0;i<5;i++){
+      const seg=new THREE.Group(); seg.position.z=i?-2.4:0; prev.add(seg);
+      const tm=m(new THREE.ConeGeometry(1.7-i*0.25,2.6,7),bodyMat); tm.rotation.x=Math.PI/2; tm.position.z=-1.2; seg.add(tm);
+      prev=seg;
+    }
+    animated.tail=tailRoot;
+    for(let i=0;i<5;i++){
+      const vent=new THREE.Mesh(new THREE.BoxGeometry(0.22,0.1,6.5),glowMat);
+      vent.position.set(-3+i*1.5,7.3,1); staticGroup.add(vent);
+    }
+    const core=new THREE.Mesh(new THREE.OctahedronGeometry(1.6,0),glowMat); core.position.set(0,10.2,2); staticGroup.add(core); animated.core=core;
+  } else if(id==='wind'){
+    const body=m(new THREE.SphereGeometry(1,14,10),bodyMat); body.position.y=24; body.scale.set(6.2,4.0,8.5); staticGroup.add(body);
+    const head=m(new THREE.SphereGeometry(1,12,9),bodyMat); head.position.set(0,25.8,7.5); head.scale.set(3.0,2.7,3.5); staticGroup.add(head);
+    const beak=m(new THREE.ConeGeometry(1.0,3.4,5),metalMat); beak.position.set(0,25.3,11.0); beak.rotation.x=Math.PI/2; staticGroup.add(beak);
+    for(const s of [-1,1]){
+      const eye=new THREE.Mesh(new THREE.SphereGeometry(0.28,6,5),glowMat); eye.position.set(s*1.1,26.4,9.7); staticGroup.add(eye);
+    }
+    const wingRootL=new THREE.Group(), wingRootR=new THREE.Group();
+    wingRootL.position.set(-4.5,24.5,0); wingRootR.position.set(4.5,24.5,0); root.add(wingRootL); root.add(wingRootR);
+    for(const [grp,s] of [[wingRootL,-1],[wingRootR,1]]){
+      for(let i=0;i<4;i++){
+        const feather=m(new THREE.BoxGeometry(7-i*0.8,0.28,3.0-i*0.4),i%2?bodyMat:darkMat);
+        feather.position.set(s*(3.0+i*2.7),-i*0.55,i*0.35); feather.rotation.z=s*(0.08+i*0.06); feather.rotation.y=s*-0.1; grp.add(feather);
+      }
+    }
+    animated.wingL=wingRootL; animated.wingR=wingRootR;
+    const tail=m(new THREE.ConeGeometry(2.0,6,6),bodyMat); tail.position.set(0,24.0,-8.5); tail.rotation.x=-Math.PI/2; staticGroup.add(tail);
+    const core=new THREE.Mesh(new THREE.IcosahedronGeometry(1.3,1),glowMat); core.position.set(0,24.8,1); staticGroup.add(core); animated.core=core;
+    const rotor=new THREE.Mesh(new THREE.TorusGeometry(3.2,0.12,5,28),metalMat); rotor.rotation.x=Math.PI/2; rotor.position.y=28.8; staticGroup.add(rotor); animated.rotor=rotor;
+  } else { // thunder / Naboris
+    const body=m(new THREE.SphereGeometry(1,14,10),bodyMat); body.position.y=7.4; body.scale.set(5.0,4.6,9.5); staticGroup.add(body);
+    for(const [sx,sz] of [[-3.6,-5],[3.6,-5],[-3.6,5],[3.6,5]]){
+      const leg=m(new THREE.CylinderGeometry(0.85,1.5,7,7),bodyMat); leg.position.set(sx,3.7,sz); staticGroup.add(leg);
+      const foot=m(new THREE.BoxGeometry(2.0,0.7,2.6),darkMat); foot.position.set(sx,0.35,sz+0.3); staticGroup.add(foot);
+    }
+    for(const s of [-1,1]){
+      const hump=m(new THREE.SphereGeometry(2.7,12,8),darkMat); hump.position.set(s*1.8,10.0,0); hump.scale.set(1,0.75,1.5); staticGroup.add(hump);
+    }
+    const neckRoot=new THREE.Group(); neckRoot.position.set(0,9.6,7.8); root.add(neckRoot);
+    let prev=neckRoot;
+    for(let i=0;i<4;i++){
+      const seg=new THREE.Group(); seg.position.y=i?2.1:0; prev.add(seg);
+      const nm=m(new THREE.CylinderGeometry(0.9-i*0.1,1.1-i*0.1,2.2,7),bodyMat); nm.position.y=1.0; seg.add(nm);
+      seg.rotation.x=i===0?0.35:0.24;
+      prev=seg;
+    }
+    const head=new THREE.Group(); head.position.y=2.0; prev.add(head);
+    const skull=m(new THREE.SphereGeometry(1,10,8),bodyMat); skull.scale.set(2.0,1.7,3.0); head.add(skull);
+    for(const s of [-1,1]){
+      const eye=new THREE.Mesh(new THREE.SphereGeometry(0.26,6,5),glowMat); eye.position.set(s*1.0,0.4,2.3); head.add(eye);
+    }
+    const jaw=m(new THREE.BoxGeometry(2.6,0.5,3.2),darkMat); jaw.position.set(0,-1.0,1.0); head.add(jaw); animated.jaw=jaw;
+    animated.neck=neckRoot;
+    for(let i=0;i<4;i++){
+      const ring=new THREE.Mesh(new THREE.TorusGeometry(2.2,0.12,5,20),glowMat);
+      ring.rotation.y=Math.PI/2; ring.position.set(0,7.6,-5+i*3.4); staticGroup.add(ring);
+    }
+    const core=new THREE.Mesh(new THREE.IcosahedronGeometry(1.5,1),glowMat); core.position.set(0,12.4,0); staticGroup.add(core); animated.core=core;
+  }
+  // small Sheikah glows shared by all beasts
+  for(let i=0;i<6;i++){
+    const a=i/6*Math.PI*2;
+    const rune=new THREE.Mesh(new THREE.BoxGeometry(0.18,0.7,0.08),glowMat);
+    rune.position.set(Math.cos(a)*3.0,5.0,Math.sin(a)*5.0); rune.rotation.y=-a; staticGroup.add(rune);
+  }
+  mergeStaticGroup(staticGroup);
+  root.add(staticGroup);
+  const baseY=h+(floatY||0);
+  root.position.set(x,baseY,z);
+  root.rotation.y=(id==='wind'?0.4:id==='thunder'?0.8:0.25);
+  scene.add(root);
+  const rec={id,group:root,pos:new THREE.Vector3(x,baseY,z),animated,baseY,name:cfg.name};
+  divineBeasts.push(rec);
+  pushCollidable(x,z,10,'beast',id==='wind'?30:16,true);
+  return rec;
+}
+function makePlateauGate(x,z){
+  const g=new THREE.Group(); g.name='plateau-gate';
+  const stone=toon(0x8a8a80,{shadowColor:0x3a3a32,steps:3,rimColor:0xddddcc});
+  const dark=toon(0x5a5a52,{shadowColor:0x24241e,steps:3});
+  let baseY=terrainHeight(x,z);
+  for(let i=0;i<10;i++){ const a=i/10*Math.PI*2; baseY=Math.max(baseY,terrainHeight(x+Math.cos(a)*8,z+Math.sin(a)*8)); }
+  const platform=new THREE.Mesh(new THREE.BoxGeometry(18,1.4,5),dark);
+  platform.position.y=0.7; platform.receiveShadow=true; g.add(platform);
+  for(const sx of [-1,1]){
+    const tower=new THREE.Mesh(new THREE.BoxGeometry(4,13,4),stone);
+    tower.position.set(sx*6,7,0); tower.castShadow=true; tower.receiveShadow=true; g.add(tower);
+    const cap=new THREE.Mesh(new THREE.BoxGeometry(4.8,0.9,4.8),dark);
+    cap.position.set(sx*6,13.8,0); cap.castShadow=true; g.add(cap);
+    for(let i=0;i<4;i++){
+      const merlon=new THREE.Mesh(new THREE.BoxGeometry(0.8,1.1,0.8),stone);
+      merlon.position.set(sx*6+(i%2?1.4:-1.4),14.7,(i<2?1.4:-1.4)); g.add(merlon);
+    }
+    const glow=new THREE.Mesh(new THREE.TorusGeometry(0.65,0.08,5,16),
+      new THREE.MeshBasicMaterial({color:0x88ddff,transparent:true,opacity:0.8,depthWrite:false}));
+    glow.position.set(sx*6,9,2.05); g.add(glow);
+  }
+  const arch=new THREE.Mesh(new THREE.BoxGeometry(13,1.6,2.6),stone);
+  arch.position.y=12.3; arch.castShadow=true; g.add(arch);
+  const keystone=new THREE.Mesh(new THREE.ConeGeometry(1.0,1.8,4),dark);
+  keystone.position.y=11.1; keystone.rotation.y=Math.PI/4; g.add(keystone);
+  for(let i=0;i<5;i++){
+    const crack=new THREE.Mesh(new THREE.BoxGeometry(rand(0.2,0.5),rand(1,4),0.1),dark);
+    crack.position.set(rand(-5,5),rand(4,10),rand(-2.2,2.2)); crack.rotation.z=rand(-0.4,0.4); g.add(crack);
+  }
+  g.position.set(x,baseY,z); g.rotation.y=0.35; scene.add(g);
+  pushCollidable(x-6,z,2.8,'gate',14,true); pushCollidable(x+6,z,2.8,'gate',14,true);
+  mergeStaticGroup(g);
+}
+
+function makeWindmill(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='windmill';
+  const woodMat=toon(0x8a6a4a,{shadowColor:0x3a2a1a,steps:3,rimColor:0xffcc88});
+  const bladeMat=toon(0xd8c8a8,{shadowColor:0x6a5a3a,steps:3});
+  const tower=new THREE.Mesh(new THREE.CylinderGeometry(1.4,2.6,13,8),woodMat);
+  tower.position.y=6.5; tower.castShadow=true; g.add(tower);
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(2.4,3.5,8),toon(0x6a3a2a,{shadowColor:0x2a1a10,steps:3}));
+  roof.position.y=14.5; roof.castShadow=true; g.add(roof);
+  const blades=new THREE.Group();
+  blades.position.set(0,11.5,2.4);
+  for(let i=0;i<4;i++){
+    const holder=new THREE.Group();
+    const blade=new THREE.Mesh(new THREE.BoxGeometry(0.7,6,0.12),bladeMat);
+    blade.position.y=3.2; blade.castShadow=true; holder.add(blade);
+    holder.rotation.z=i*Math.PI/2;
+    blades.add(holder);
+  }
+  const hub=new THREE.Mesh(new THREE.SphereGeometry(0.4,8,6),woodMat);
+  blades.add(hub);
+  g.add(blades);
+  g.position.set(x,h,z); scene.add(g);
+  windmillBlades.push(blades);
+  pushCollidable(x,z,2.6,'windmill',17,true);
+}
+
+function makeWell(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='well';
+  const stoneMat=toon(0x7a7a82,{shadowColor:0x3a3a42,steps:3});
+  const woodMat=toon(0x6a4a2a,{shadowColor:0x2a1a0a,steps:3});
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(1.2,0.4,6,12),stoneMat);
+  ring.rotation.x=Math.PI/2; ring.position.y=0.4; g.add(ring);
+  const water=new THREE.Mesh(new THREE.CircleGeometry(1.0,12),new THREE.MeshStandardMaterial({color:0x2a5a7a,roughness:0.2,metalness:0.3}));
+  water.rotation.x=-Math.PI/2; water.position.y=0.25; g.add(water);
+  for(const s of [-1,1]){
+    const post=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.08,2.4,5),woodMat);
+    post.position.set(s*1.05,1.6,0); g.add(post);
+  }
+  const roof=new THREE.Mesh(new THREE.ConeGeometry(1.7,1.1,4),toon(0x6a3a2a,{shadowColor:0x2a1a10,steps:3}));
+  roof.position.y=3.1; roof.rotation.y=Math.PI/4; g.add(roof);
+  const bucket=new THREE.Mesh(new THREE.CylinderGeometry(0.22,0.18,0.35,8),woodMat);
+  bucket.position.set(0,1.9,0); g.add(bucket);
+  g.position.set(x,h,z); scene.add(g);
+  pushCollidable(x,z,1.5,'well',3.5,false);
+  mergeStaticGroup(g);
+}
+
+function makeCampTent(x,z,angle=0){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='camp-tent';
+  const canvas=toon(0xc8b48a,{shadowColor:0x5a4a32,steps:3,rimColor:0xffecc8});
+  const canvasDark=toon(0x9a7650,{shadowColor:0x3a2a18,steps:3});
+  const wood=toon(0x6a4a2a,{shadowColor:0x2a1a0a,steps:3});
+  const rope=toon(0x8a7450,{shadowColor:0x3a2a14,steps:2});
+  for(const sx of [-1,1]){
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.08,2.6,5),wood);
+    pole.position.set(sx*1.8,1.3,0); pole.castShadow=true; g.add(pole);
+  }
+  // two canvas panels leaning to a ridge
+  for(const side of [-1,1]){
+    const panel=new THREE.Mesh(new THREE.BoxGeometry(2.9,0.08,2.3),canvas);
+    panel.position.set(side*0.8,1.25,0); panel.rotation.z=side*0.56; panel.castShadow=true; panel.receiveShadow=true; g.add(panel);
+    const trim=new THREE.Mesh(new THREE.BoxGeometry(2.95,0.04,0.16),canvasDark);
+    trim.position.set(side*0.8,1.25,1.05); trim.rotation.z=side*0.56; g.add(trim);
+  }
+  const ridge=new THREE.Mesh(new THREE.CylinderGeometry(0.055,0.055,3.8,5),wood);
+  ridge.rotation.z=Math.PI/2; ridge.position.y=2.48; g.add(ridge);
+  // bedroll & pack
+  const bed=new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.28,1.45,6),toon(0x5a6a4a,{shadowColor:0x1a2a14,steps:3}));
+  bed.rotation.z=Math.PI/2; bed.position.set(0,0.22,0.25); bed.scale.y=0.5; g.add(bed);
+  const pack=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.55,0.4),toon(0x7a5a34,{shadowColor:0x2a1a08,steps:3}));
+  pack.position.set(1.25,0.3,-0.65); g.add(pack);
+  // lantern
+  const lantern=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.12,0.28,6),
+    new THREE.MeshStandardMaterial({color:0xffcc77,emissive:0xff9933,emissiveIntensity:1.8,roughness:0.25}));
+  lantern.position.set(-1.3,1.0,0.5); g.add(lantern);
+  const llight=new THREE.PointLight(0xffaa55,1.1,7,2); llight.position.copy(lantern.position); g.add(llight);
+  for(const [sx,sz] of [[-2.6,1.8],[2.6,1.8],[-2.6,-1.8],[2.6,-1.8]]){
+    const stake=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.03,0.6,4),wood);
+    stake.position.set(sx,0.3,sz); g.add(stake);
+    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(sx,0.55,sz),new THREE.Vector3(0,2.45,0)]),new THREE.LineBasicMaterial({color:0x8a7450,transparent:true,opacity:0.5}));
+    g.add(line);
+  }
+  g.position.set(x,h,z); g.rotation.y=angle; scene.add(g);
+  mergeStaticGroup(g);
+  pushCollidable(x,z,2.4,'tent',2.6,false);
+}
+
+function makeYigaHideout(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='yiga-hideout';
+  const dark=toon(0x241a22,{shadowColor:0x080508,steps:3,rimColor:0xaa5577});
+  const red=toon(0x7a1a2a,{shadowColor:0x28080e,steps:3,rimColor:0xff8888});
+  const gold=toon(0xb08a34,{shadowColor:0x4a3410,steps:3,rimColor:0xffe9a0});
+  const base=new THREE.Mesh(new THREE.CylinderGeometry(13,14.5,0.8,10),dark);
+  base.position.y=0.4; base.receiveShadow=true; g.add(base);
+  for(let i=0;i<4;i++){
+    const a=i/4*Math.PI*2+Math.PI/4;
+    const px=Math.cos(a)*8, pz=Math.sin(a)*8;
+    const post=new THREE.Mesh(new THREE.CylinderGeometry(0.28,0.34,7.5,6),dark);
+    post.position.set(px,4.1,pz); post.castShadow=true; g.add(post);
+    const banner=new THREE.Mesh(new THREE.PlaneGeometry(1.7,5.0),red);
+    banner.position.set(px+Math.cos(a+Math.PI/2)*0.95,4.9,pz+Math.sin(a+Math.PI/2)*0.95);
+    banner.rotation.y=-a; g.add(banner);
+    const symbol=new THREE.Mesh(new THREE.RingGeometry(0.3,0.5,6),gold);
+    symbol.position.set(px,5.6,pz); symbol.rotation.y=-a+0.1; g.add(symbol);
+  }
+  const arch=new THREE.Mesh(new THREE.BoxGeometry(13,0.9,1.2),dark); arch.position.set(0,7.0,-8); g.add(arch);
+  const skull=new THREE.Mesh(new THREE.SphereGeometry(1.2,10,8),toon(0xd0c8b0,{steps:3,rimColor:0xffffff}));
+  skull.position.set(0,2.3,-8); skull.scale.set(1.2,1.0,0.6); g.add(skull);
+  for(const s of [-1,1]){
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.2,6,5),new THREE.MeshBasicMaterial({color:0x220000}));
+    eye.position.set(s*0.45,2.4,-7.4); g.add(eye);
+  }
+  const throne=new THREE.Mesh(new THREE.BoxGeometry(3.2,1.0,2.6),dark); throne.position.set(0,1.2,-6); g.add(throne);
+  const trim=new THREE.Mesh(new THREE.BoxGeometry(3.5,0.12,2.9),gold); trim.position.set(0,1.75,-6); g.add(trim);
+  for(let i=0;i<8;i++){
+    const a=rand(0,6.28), r=rand(3,11);
+    const peb=new THREE.Mesh(new THREE.DodecahedronGeometry(rand(0.15,0.4),0),dark);
+    peb.position.set(Math.cos(a)*r,0.9,Math.sin(a)*r); g.add(peb);
+  }
+  g.position.set(x,h,z); scene.add(g);
+  mergeStaticGroup(g);
+}
+
+function makeCampfire(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='campfire';
+  const stoneMat=toon(0x5a5a5a,{shadowColor:0x2a2a2a,steps:3});
+  for(let i=0;i<8;i++){
+    const ang=(i/8)*Math.PI*2;
+    const stone=new THREE.Mesh(new THREE.DodecahedronGeometry(0.3,0),stoneMat);
+    stone.position.set(Math.cos(ang)*0.85, 0.2, Math.sin(ang)*0.85);
+    stone.rotation.set(rand(0,3),rand(0,3),0);
+    g.add(stone);
+  }
+  const woodMat=toon(0x4a2a1a,{shadowColor:0x1a0a05,steps:3});
+  for(let i=0;i<3;i++){
+    const log=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.1,1.2,5),woodMat);
+    log.rotation.z=Math.PI/2; log.rotation.y=i*Math.PI/3; log.position.y=0.3; g.add(log);
+  }
+  const flameMat=new THREE.MeshBasicMaterial({color:0xff6622,transparent:true,opacity:0.9,blending:THREE.AdditiveBlending});
+  const flame=new THREE.Mesh(new THREE.ConeGeometry(0.35,0.9,6),flameMat);
+  flame.position.y=0.85; g.add(flame);
+  const flame2=new THREE.Mesh(new THREE.ConeGeometry(0.2,0.5,5),new THREE.MeshBasicMaterial({color:0xffdd44,transparent:true,opacity:0.8,blending:THREE.AdditiveBlending}));
+  flame2.position.y=0.6; g.add(flame2);
+  const light=new THREE.PointLight(0xff7733,2.2,14); light.position.y=1.3; g.add(light);
+  g.position.set(x,h,z); scene.add(g);
+  campfires.push({flame,flame2,light,baseY:h,pos:new THREE.Vector3(x,h,z),lit:true});
+}
+
+function makeSignpost(x,z,name){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='signpost';
+  const woodMat=toon(0x6a4a2a,{shadowColor:0x2a1a0a,steps:3});
+  const post=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.1,2.6,5),woodMat);
+  post.position.y=1.3; post.castShadow=true; g.add(post);
+  const sign=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.5,0.08),toon(0xc8a878,{shadowColor:0x6a5a3a,steps:3}));
+  sign.position.set(0.3,2.1,0); sign.castShadow=true; g.add(sign);
+  g.position.set(x,h,z); g.rotation.y=rand(0,Math.PI*2); scene.add(g);
+  pushCollidable(x,z,0.3,'signpost',2.6,false);
+  mergeStaticGroup(g);
+}
+
+function makeRuins(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='ruins';
+  const stoneMat=toon(0x7a7a72,{shadowColor:0x3a3a32,steps:3,rimColor:0xddddcc});
+  for(let i=0;i<6;i++){
+    const ang=i*0.9+rand(-0.3,0.3);
+    const r=rand(3,6.5);
+    const ph=rand(1.2,3.5);
+    const col=new THREE.Mesh(new THREE.CylinderGeometry(0.4,0.5,ph,6),stoneMat);
+    col.position.set(Math.cos(ang)*r, ph/2, Math.sin(ang)*r);
+    col.rotation.z=rand(-0.3,0.3); col.castShadow=true; g.add(col);
+    if(Math.random()<0.6){
+      const cap=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.3,1.1),stoneMat);
+      cap.position.set(col.position.x, ph+0.15, col.position.z); g.add(cap);
+    }
+  }
+  for(let i=0;i<4;i++){
+    const block=new THREE.Mesh(new THREE.BoxGeometry(rand(0.8,1.5),rand(0.5,0.8),rand(0.8,1.5)),stoneMat);
+    block.position.set(rand(-4,4),0.3,rand(-4,4));
+    block.rotation.set(rand(0,1),rand(0,3),rand(0,1)); block.castShadow=true; g.add(block);
+  }
+  g.position.set(x,h,z); scene.add(g);
+  pushCollidable(x,z,4,'ruins',3,true);
+  mergeStaticGroup(g);
+}
+
+// ============================================================
+// NPC（含头顶名牌）
+// ============================================================
+const NPC_SKIN_MAT=toon(0xd9b38c,{shadowColor:0x8a6a50,steps:3});
+const NPC_HAIR_MAT=toon(0x5a3a2a,{shadowColor:0x2a1a10,steps:3});
+const NPC_EYE_MAT=new THREE.MeshStandardMaterial({color:0x222222,roughness:0.6});
+const NPC_GLASS_MAT=new THREE.MeshStandardMaterial({color:0x88ccff,transparent:true,opacity:0.4,roughness:0.1,metalness:0.3});
+function makeNpc(x,z,name,color,lines,type='villager'){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group(); g.name='npc';
+  const bodyMat=toon(color,{shadowColor:new THREE.Color(color).multiplyScalar(0.5).getHex(),steps:3});
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.3,0.9,8),bodyMat);
+  body.position.y=0.85; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.18,8,7),NPC_SKIN_MAT);
+  head.position.y=1.5; head.castShadow=true; g.add(head);
+  const hair=new THREE.Mesh(new THREE.SphereGeometry(0.19,8,5,0,Math.PI*2,0,Math.PI*0.6),NPC_HAIR_MAT);
+  hair.position.y=1.52; g.add(hair);
+  for(const s of [-1,1]){
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.03,4,3),NPC_EYE_MAT);
+    eye.position.set(s*0.07,1.5,0.16); g.add(eye);
+  }
+  if(type==='elder'){
+    const hat=new THREE.Mesh(new THREE.ConeGeometry(0.26,0.52,8),toon(0xb83a2e,{shadowColor:0x3a0a0a,steps:3,rimColor:0xffb080}));
+    hat.position.y=1.88; hat.castShadow=true; g.add(hat);
+    const brim=new THREE.Mesh(new THREE.TorusGeometry(0.25,0.035,5,14),toon(0x6a2a1a,{steps:3}));
+    brim.rotation.x=Math.PI/2; brim.position.y=1.66; g.add(brim);
+    const beard=new THREE.Mesh(new THREE.ConeGeometry(0.13,0.42,6),toon(0xe8e0d0,{shadowColor:0x8a8074,steps:3,rimColor:0xffffff}));
+    beard.position.set(0,1.29,0.14); beard.rotation.x=Math.PI; g.add(beard);
+    const staff=new THREE.Mesh(new THREE.CylinderGeometry(0.03,0.03,1.8,5),toon(0x6a4a2a,{shadowColor:0x2a1a0a,steps:3}));
+    staff.position.set(0.35,0.9,0); g.add(staff);
+    const staffGlow=new THREE.Mesh(new THREE.IcosahedronGeometry(0.09,0),new THREE.MeshBasicMaterial({color:0xffdd88}));
+    staffGlow.position.set(0.35,1.82,0); g.add(staffGlow);
+  } else if(type==='researcher'){
+    const hat=new THREE.Mesh(new THREE.SphereGeometry(0.20,8,5,0,Math.PI*2,0,Math.PI*0.55),toon(0x3a5a8a,{shadowColor:0x1a2a4a,steps:3}));
+    hat.position.y=1.54; g.add(hat);
+    for(const s of [-1,1]){
+      const lens=new THREE.Mesh(new THREE.CircleGeometry(0.05,8),NPC_GLASS_MAT);
+      lens.position.set(s*0.07,1.5,0.18); g.add(lens);
+    }
+  } else if(type==='guard'){
+    const helmet=new THREE.Mesh(new THREE.CylinderGeometry(0.2,0.22,0.2,8),toon(0x8a8a92,{shadowColor:0x3a3a42,steps:4,rimColor:0xccddff}));
+    helmet.position.y=1.66; g.add(helmet);
+    const spear=new THREE.Mesh(new THREE.CylinderGeometry(0.025,0.025,2.4,5),toon(0x6a4a2a,{shadowColor:0x2a1a0a,steps:3}));
+    spear.position.set(0.38,1.1,0); g.add(spear);
+    const tip=new THREE.Mesh(new THREE.ConeGeometry(0.06,0.2,5),toon(0xb8b8c0,{shadowColor:0x5a5a68,steps:4}));
+    tip.position.set(0.38,2.35,0); g.add(tip);
+  } else if(type==='merchant'){
+    const pack=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.6,0.35),toon(0x8a5a2a,{shadowColor:0x3a2a0a,steps:3}));
+    pack.position.set(0,1.0,-0.28); g.add(pack);
+    const hood=new THREE.Mesh(new THREE.SphereGeometry(0.2,8,5,0,Math.PI*2,0,Math.PI*0.7),toon(0x5a7a3a,{shadowColor:0x2a3a1a,steps:3}));
+    hood.position.y=1.52; g.add(hood);
+  }
+  // ★ 头顶名字标签
+  const labelCanvas = document.createElement('canvas');
+  labelCanvas.width = 256; labelCanvas.height = 72;
+  const lctx = labelCanvas.getContext('2d');
+  paintNpcLabel(lctx, name);
+  const labelTex = new THREE.CanvasTexture(labelCanvas);
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: labelTex, transparent: true, depthWrite: false, depthTest: false
+  }));
+  label.scale.set(3.4, 1.0, 1);
+  label.position.y = 2.6;
+  g.add(label);
+  g.userData.label = label;
+  let questMark=null;
+  if(type==='elder'){
+    const qc=document.createElement('canvas'); qc.width=qc.height=96;
+    const qx=qc.getContext('2d');
+    qx.fillStyle='rgba(8,14,18,.82)'; qx.beginPath(); qx.arc(48,48,34,0,Math.PI*2); qx.fill();
+    qx.strokeStyle='rgba(255,220,120,.9)'; qx.lineWidth=4; qx.stroke();
+    qx.fillStyle='#ffe08a'; qx.font='bold 58px Georgia'; qx.textAlign='center'; qx.textBaseline='middle'; qx.fillText('!',48,50);
+    const qt=new THREE.CanvasTexture(qc);
+    questMark=new THREE.Sprite(new THREE.SpriteMaterial({map:qt,transparent:true,depthWrite:false,depthTest:false}));
+    questMark.scale.set(1.0,1.0,1); questMark.position.y=3.45; g.add(questMark);
+  }
+
+  g.position.set(x,h,z);
+  g.rotation.y=rand(0,Math.PI*2);
+  scene.add(g);
+  npcs.push({
+    group:g,pos:new THREE.Vector3(x,h,z),name,lines,type,talked:false,
+    labelCanvas,labelCtx:lctx,labelTex,label,questMark,
+    body,head,home:new THREE.Vector3(x,h,z),homeYaw:g.rotation.y,
+    state:'idle',wanderT:rand(1,5),target:null,panicT:0,speed:0,animT:rand(0,6),
+    hitReact:0,
+  });
+}
+function updateNPCs(dt){
+  for(const npc of npcs){
+    const scrollDist=Math.hypot(npc.pos.x-player.pos.x,npc.pos.z-player.pos.z);
+    if(scrollDist>170){ npc.group.visible=false; continue; }
+    npc.group.visible=true;
+    npc.animT+=dt;
+    if(npc.panicT>0) npc.panicT-=dt;
+    let threat=null, threatD=99;
+    for(const m of monsters){
+      if(m.state==='dead') continue;
+      const d=m.pos.distanceTo(npc.pos);
+      if(d<13&&d<threatD){ threat=m; threatD=d; }
+    }
+    const toPlayer=player.pos.clone().sub(npc.pos); toPlayer.y=0;
+    const playerD=toPlayer.length();
+    let moveX=0,moveZ=0;
+    if(npc.panicT>0||threat){
+      npc.state='flee';
+      const away=threat?npc.pos.clone().sub(threat.pos):npc.pos.clone().sub(player.pos);
+      away.y=0; if(away.lengthSq()<0.01) away.set(1,0,0);
+      away.normalize();
+      npc.speed=Math.min(2.0,(npc.speed||0)+dt*3.2);
+      moveX=away.x*npc.speed*1.7; moveZ=away.z*npc.speed*1.7;
+    } else if(playerD<4.5){
+      npc.state='talk'; npc.speed=0;
+      npc.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+    } else {
+      npc.wanderT-=dt;
+      if(npc.wanderT<=0){
+        npc.wanderT=rand(2.5,7);
+        const a=rand(0,6.28), r=rand(0,7);
+        npc.target=new THREE.Vector3(npc.home.x+Math.cos(a)*r,0,npc.home.z+Math.sin(a)*r);
+      }
+      if(npc.target){
+        const dir=npc.target.clone().sub(npc.pos); dir.y=0;
+        const d=dir.length();
+        if(d>0.6){ dir.normalize(); npc.speed=Math.min(0.65,npc.speed+dt*1.5); moveX=dir.x*npc.speed; moveZ=dir.z*npc.speed; npc.state='walk'; npc.group.rotation.y=Math.atan2(dir.x,dir.z); }
+        else { npc.speed=0; npc.state='idle'; npc.target=null; }
+      }
+    }
+    if(moveX||moveZ){
+      let nx=npc.pos.x+moveX*dt, nz=npc.pos.z+moveZ*dt;
+      if(!isWater(nx,nz) && terrainSlope(nx,nz)<1.2){
+        npc.pos.x=nx; npc.pos.z=nz;
+      } else npc.target=null;
+    }
+    npc.pos.y=terrainHeight(npc.pos.x,npc.pos.z);
+    npc.group.position.copy(npc.pos);
+    if(npc.questMark){
+      npc.questMark.visible=npc.type==='elder'&&quest.stage==='tutorial'&&!npc.talked;
+      npc.questMark.position.y=3.45+Math.sin(performance.now()*0.003)*0.12;
+      npc.questMark.material.rotation=Math.sin(performance.now()*0.0015)*0.12;
+    }
+    // subtle idle / walk / panic animation
+    const walking=(moveX||moveZ)?1:0;
+    const bob=(npc.state==='flee'?Math.sin(npc.animT*12)*0.12:walking?Math.sin(npc.animT*7)*0.055:Math.sin(npc.animT*2)*0.025);
+    npc.group.position.y+=Math.abs(bob);
+    if(npc.body) npc.body.rotation.z=npc.state==='flee'?Math.sin(npc.animT*11)*0.12:Math.sin(npc.animT*3)*0.02;
+    if(npc.head) npc.head.rotation.z=Math.sin(npc.animT*2.2)*0.03;
+    if(npc.state==='flee' && Math.random()<dt*2.5){ try{ SFX.stepSoft&&SFX.stepSoft(); }catch(e){} }
+    // attacking the air near a villager makes them yelp and dodge away
+    if(player.attackTimer>0 && playerD<5.5 && npc.panicT<=0){
+      npc.panicT=2.4; npc.speed=1.4;
+      emitParticles(sparkSys,npc.pos.x,npc.pos.y+1.2,npc.pos.z,8,2,0.4,new THREE.Color(0xffeebb));
+      try{ SFX.hit&&SFX.hit(); }catch(e){}
+    }
+  }
+}
+function paintNpcLabel(ctx, text){
+  const r=12, w=240, hh=56, ox=8, oy=8;
+  ctx.clearRect(0,0,256,72);
+  ctx.beginPath();
+  ctx.moveTo(ox+r, oy); ctx.lineTo(ox+w-r, oy);
+  ctx.quadraticCurveTo(ox+w, oy, ox+w, oy+r);
+  ctx.lineTo(ox+w, oy+hh-r);
+  ctx.quadraticCurveTo(ox+w, oy+hh, ox+w-r, oy+hh);
+  ctx.lineTo(ox+r, oy+hh);
+  ctx.quadraticCurveTo(ox, oy+hh, ox, oy+hh-r);
+  ctx.lineTo(ox, oy+r);
+  ctx.quadraticCurveTo(ox, oy, ox+r, oy);
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(6,12,18,.82)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(200,180,120,.55)';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.font = 'bold 28px "Noto Serif SC", "Noto Serif JP", serif';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#e8d8a8';
+  ctx.fillText(text, 128, 38);
+}
+
+// ============================================================
+// 神庙
+// ============================================================
+const shrines=[];
+function makeShrine(x,z,name,startActivated=false,type='normal'){
+  const h=terrainHeight(x,z), g=new THREE.Group(); g.name='shrine';
+  const faro=type==='divine';
+  const stoneMat=toon(faro?0x6c6a78:0x585864,{shadowColor:0x1a1a22,steps:3,rimColor:0xaabbd0});
+  const stoneDark=toon(0x30303a,{shadowColor:0x0e0e14,steps:3});
+  const goldMat=toon(0xa8905a,{shadowColor:0x3a2a10,steps:3,rimColor:0xffe8a0});
+  const glowMat=new THREE.MeshStandardMaterial({
+    color:faro?0x6a4322:0x2a4256,
+    emissive:faro?0x7a3a10:0x0a1c2c,
+    emissiveIntensity:faro?0.8:0.45,
+    roughness:0.22,metalness:0.25
+  });
+  // stepped octagonal plinth
+  for(let i=0;i<2;i++){
+    const step=new THREE.Mesh(new THREE.CylinderGeometry(4.2-i*0.55,4.7-i*0.55,0.48,10),i?stoneDark:stoneMat);
+    step.position.y=0.24+i*0.48; step.castShadow=true; step.receiveShadow=true; g.add(step);
+  }
+  // tapered shrine body
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(2.0,2.55,4.8,8),stoneMat);
+  body.position.y=3.3; body.rotation.y=Math.PI/8; body.castShadow=true; body.receiveShadow=true; g.add(body);
+  const belt=new THREE.Mesh(new THREE.TorusGeometry(2.16,0.13,5,20),goldMat);
+  belt.rotation.x=Math.PI/2; belt.position.y=3.1; belt.scale.set(1.06,1.06,1); g.add(belt);
+  const crown=new THREE.Mesh(new THREE.CylinderGeometry(2.55,2.1,0.5,8),stoneDark);
+  crown.position.y=5.85; crown.rotation.y=Math.PI/8; crown.castShadow=true; g.add(crown);
+  // door arch facing +z
+  const doorDark=new THREE.Mesh(new THREE.BoxGeometry(1.55,2.75,0.22),new THREE.MeshStandardMaterial({color:0x0a0d16,roughness:0.6,metalness:0.3}));
+  doorDark.position.set(0,2.9,1.91); g.add(doorDark);
+  const doorGlow=new THREE.Mesh(new THREE.PlaneGeometry(1.32,2.5),
+    new THREE.MeshBasicMaterial({color:faro?0xffaa44:0x88ddff,transparent:true,opacity:0.35,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+  doorGlow.position.set(0,2.85,2.03); doorGlow.name='shrine-door'; g.add(doorGlow);
+  for(const s of [-1,1]){
+    const jamb=new THREE.Mesh(new THREE.BoxGeometry(0.28,3.1,0.5),goldMat);
+    jamb.position.set(s*0.88,2.9,1.92); jamb.rotation.z=s*0.06; g.add(jamb);
+    const fin=new THREE.Mesh(new THREE.BoxGeometry(0.42,3.6,0.18),stoneDark);
+    fin.position.set(s*2.35,3.4,0.4); fin.rotation.z=s*0.32; fin.rotation.y=s*0.35; fin.castShadow=true; g.add(fin);
+    const stud=new THREE.Mesh(new THREE.SphereGeometry(0.15,6,5),glowMat);
+    stud.position.set(s*1.55,4.85,1.25); g.add(stud);
+  }
+  const arch=new THREE.Mesh(new THREE.TorusGeometry(1.42,0.13,5,20,Math.PI),goldMat);
+  arch.position.set(0,4.2,1.92); arch.rotation.z=Math.PI; g.add(arch);
+  // luminous eye / terminal
+  const orb=new THREE.Mesh(new THREE.IcosahedronGeometry(0.42,1),glowMat); orb.position.y=6.35; orb.userData.noMerge=true; g.add(orb);
+  const eyeRing=new THREE.Mesh(new THREE.TorusGeometry(1.1,0.07,5,26),glowMat);
+  eyeRing.position.y=6.35; eyeRing.userData.noMerge=true; g.add(eyeRing);
+  const halo=new THREE.Mesh(new THREE.TorusGeometry(2.9,0.045,5,42),
+    new THREE.MeshBasicMaterial({color:faro?0xffaa55:0x88ddff,transparent:true,opacity:0.28,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+  halo.rotation.x=Math.PI/2; halo.position.y=1.1; g.add(halo);
+  const barrier=new THREE.Mesh(new THREE.CircleGeometry(2.05,24),
+    new THREE.MeshBasicMaterial({color:faro?0xff7722:0x44bbff,transparent:true,opacity:0.10,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+  barrier.position.set(0,2.9,2.4); barrier.name='shrine-barrier'; g.add(barrier);
+  g.position.set(x,h,z); scene.add(g);
+  mergeStaticGroup(g);
+  const shrine={group:g,pos:new THREE.Vector3(x,h,z),name,orb,ring:eyeRing,halo,barrier,doorGlow,mat:glowMat,activated:false,baseY:6.35,type,challengeCleared:false};
+  shrines.push(shrine);
+  collidables.push({pos:new THREE.Vector3(x,h,z),radius:3.5,type:'shrine',height:6,climbable:true});
+  if(startActivated) activateShrine(shrine,true);
+  return shrine;
+}
+function activateShrine(s,silent=false){
+  if(s.activated) return;
+  s.activated=true; s.mat.color.setHex(0x66ccff); s.mat.emissive.setHex(0x2288cc); s.mat.emissiveIntensity=1.8;
+  if(s.doorGlow&&s.doorGlow.material) s.doorGlow.material.color.setHex(0x88ddff);
+  if(s.barrier&&s.barrier.material) s.barrier.material.color.setHex(0x44bbff);
+  if(s.halo&&s.halo.material) s.halo.material.color.setHex(0x88ddff);
+  submitRecordIfBetter('shrines', shrines.filter(x=>x.activated).length);
+  if(!silent){ playTeleportFX(s.pos.clone(),0x66ccff,1.5); SFX.rune(); toast('传送点已注册 · '+s.name); }
+}
+
+// ============================================================
+// 宝箱 / 克洛格
+// ============================================================
+const chests=[];
+function makeChest(x,z){
+  const h=terrainHeight(x,z), g=new THREE.Group(); g.name='chest';
+  const woodMat=toon(0x6a4a2a,{shadowColor:0x2a1a0a,steps:3});
+  const goldMat=toon(0xc9a84c,{shadowColor:0x6a4a10,steps:4,rimColor:0xffff88});
+  const base=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.9,1.0),woodMat); base.position.y=0.45; base.castShadow=true; g.add(base);
+  const lid=new THREE.Mesh(new THREE.BoxGeometry(1.45,0.35,1.05),woodMat); lid.position.y=1.0; lid.castShadow=true; g.add(lid);
+  const band=new THREE.Mesh(new THREE.BoxGeometry(1.5,0.1,1.1),goldMat); band.position.y=0.72; g.add(band);
+  g.position.set(x,h,z); g.rotation.y=rand(0,Math.PI*2); scene.add(g);
+  const chest={group:g,pos:new THREE.Vector3(x,h,z),opened:false,lid};
+  chests.push(chest);
+  pushCollidable(x,z,1.0,'chest',1.2,false,{ref:chest});
+}
+const koroks=[];
+function makeKorok(x,z){
+  const h=terrainHeight(x,z), g=new THREE.Group(); g.name='korok';
+  const bodyMat=toon(0x8aaa44,{shadowColor:0x3a4a10,steps:3,rimColor:0xccff88});
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.4,7,6),bodyMat)).position.y=0.45;
+  const leafMat=toon(0x4a7a22,{shadowColor:0x1a3a10,steps:3});
+  for(let i=0;i<3;i++){
+    const leaf=new THREE.Mesh(new THREE.ConeGeometry(0.22,0.55,3),leafMat);
+    leaf.position.set(Math.cos(i*2.1)*0.3,0.85,Math.sin(i*2.1)*0.3); leaf.rotation.z=0.5; g.add(leaf);
+  }
+  for(const s of [-1,1]){
+    const e=new THREE.Mesh(new THREE.SphereGeometry(0.06,4,3),new THREE.MeshStandardMaterial({color:0x111111}));
+    e.position.set(s*0.12,0.5,0.3); g.add(e);
+  }
+  g.position.set(x,h,z); g.visible=false; scene.add(g);
+  koroks.push({group:g,pos:new THREE.Vector3(x,h,z),collected:false,revealDist:rand(10,16)});
+}
+
+// ============================================================
+// 世界生成
+// ============================================================
+function buildVillage(cx,cz,name,style,npcDefs){
+  const nHouses = style==='goron'?3:(style==='rito'?4:5);
+  for(let i=0;i<nHouses;i++){
+    const ang=(i/nHouses)*Math.PI*2 + rand(-0.35,0.35);
+    const dist=rand(11,19);
+    const hx=cx+Math.cos(ang)*dist;
+    const hz=cz+Math.sin(ang)*dist;
+    if(isWater(hx,hz) || terrainHeight(hx,hz)<WATER_LEVEL+1) continue;
+    makeHouse(hx,hz,style);
+  }
+  makeCampfire(cx+rand(-6,6),cz+rand(-6,6));
+  makeWell(cx+rand(-9,9),cz+rand(-9,9));
+  makeSignpost(cx+rand(-7,7),cz+rand(-7,7),name);
+  if(style==='normal' && Math.random()<0.7) makeWindmill(cx+rand(-24,24),cz+rand(-24,24));
+  if(npcDefs) npcDefs.forEach(d=>makeNpc(d.x,d.z,d.name,d.color,d.lines,d.type));
+}
+
+function scatterWorld(){
+  for(let i=0;i<620;i++){
+    const x=rand(-HALF_X+100,HALF_X-100), z=rand(-HALF_Z+100,HALF_Z-100);
+    if(Math.hypot(x,z)<50||isWater(x,z)) continue;
+    const h=terrainHeight(x,z);
+    if(h>250) continue;
+    const nx=x/HALF_X, nz=z/HALF_Z;
+    if(Math.hypot(nx-0.55,nz-(-0.45))<0.18 && h>120) continue;
+    if(Math.hypot(nx-(-0.62),nz-(-0.55))<0.20 && h>150) continue;
+    if(Math.hypot(nx-(-0.30),nz-0.55)<0.14) continue;
+    const faronDist=Math.hypot(nx-0.35,nz-0.68);
+    const forestDensity = faronDist<0.15 ? 0.85 : 0.35 + valueNoise(x*0.02,z*0.02)*0.4;
+    if(Math.random()<forestDensity){ if(h>165||Math.random()<0.13) makePineTree(x,z); else makeTree(x,z); }
+  }
+  for(let i=0;i<260;i++){
+    const x=rand(-HALF_X+80,HALF_X-80), z=rand(-HALF_Z+80,HALF_Z-80);
+    if(Math.hypot(x,z)<40) continue;
+    if(Math.hypot(x+100,z-600)<48) continue; // keep the opening vista clear
+    makeRock(x,z,rand(0.35,1.6));
+  }
+  for(let i=0;i<6200;i++) makeGrassTuft(rand(-HALF_X+30,HALF_X-30),rand(-HALF_Z+30,HALF_Z-30));
+  for(let i=0;i<520;i++) makeFlower(rand(-HALF_X+40,HALF_X-40),rand(-HALF_Z+40,HALF_Z-40),FLOWER_COLORS);
+  for(let i=0;i<160;i++) makeBush(rand(-HALF_X+60,HALF_X-60),rand(-HALF_Z+60,HALF_Z-60));
+
+  for(let i=0;i<34;i++){
+    const x=rand(-HALF_X+100,HALF_X-100), z=rand(-HALF_Z+100,HALF_Z-100);
+    if(isWater(x,z)||Math.hypot(x,z)<50) continue; makeChest(x,z);
+  }
+  for(let i=0;i<56;i++){
+    const x=rand(-HALF_X+80,HALF_X-80), z=rand(-HALF_Z+80,HALF_Z-80);
+    if(isWater(x,z)||Math.hypot(x,z)<40) continue; makeKorok(x,z);
+  }
+
+  const STABLE_POS=[
+    [-225,350,'双子驿站'],[-300,600,'卡卡利科驿站'],[525,525,'哈特诺驿站'],
+    [700,-150,'卓拉驿站'],[775,-600,'鼓隆驿站'],[-725,675,'格鲁德驿站'],
+    [-775,-700,'利特驿站'],[0,650,'湖畔驿站'],
+  ];
+  STABLE_POS.forEach(([x,z,name])=>{
+    if(isWater(x,z)) return;
+    makeStable(x,z,name);
+  });
+
+  const TOWER_POS=[
+    [0,50,'中央海拉鲁塔'],[-150,450,'初始台地塔'],[-750,-750,'海布拉塔'],
+    [750,-600,'奥尔汀塔'],[-700,600,'格鲁德塔'],[700,-100,'拉聂尔塔'],
+    [600,800,'费罗尼塔'],[800,-450,'阿卡莱塔'],
+  ];
+  TOWER_POS.forEach(([x,z,name])=>{
+    if(isWater(x,z)) return;
+    makeTower(x,z,name);
+  });
+
+  // six explorable caves hide ore, chests and monster nests
+  makeCave(-690,-710,'海布拉 · 冰牙洞窟',0.2,2);
+  makeCave(820,-530,'死亡之山 · 熔岩洞窟',-0.5,3);
+  makeCave(-690,760,'格鲁德 · 沙底洞窟',0.75,2);
+  makeCave(425,795,'费罗尼 · 树根洞窟',0.1,2);
+  makeCave(805,-300,'阿卡莱 · 海蚀洞窟',-0.9,2);
+
+  makeBridge(0, 350, 0, '海利亚大桥');
+  makeBridge(0, 650, 0, '湖之大桥');
+  makeBridge(650, 100, Math.PI/3, '卓拉大桥');
+  makeBridge(-600, -350, Math.PI/4, '海布拉大桥');
+  makeBridge(-500, 750, Math.PI/2, '格鲁德大桥');
+  makeBridge(550, 850, Math.PI/4, '费罗尼大桥');
+
+  makeCastle(0,-50);
+
+  // Four Divine Beasts loom over their regions.
+  makeDivineBeast('water',LANDMARKS.divineWater.x+34,LANDMARKS.divineWater.z-24,0);
+  makeDivineBeast('wind',LANDMARKS.divineWind.x-38,LANDMARKS.divineWind.z-28,26);
+  makeDivineBeast('fire',LANDMARKS.divineFire.x+30,LANDMARKS.divineFire.z-26,2);
+  makeDivineBeast('thunder',LANDMARKS.divineThunder.x-34,LANDMARKS.divineThunder.z+26,0);
+  makeYigaHideout(-880,790);
+
+  buildVillage(LANDMARKS.kakariko.x, LANDMARKS.kakariko.z, '卡卡利科村', 'normal', [
+    {x:LANDMARKS.kakariko.x+8, z:LANDMARKS.kakariko.z-6, name:'英帕', color:0x8a2a2a, type:'elder',
+     lines:['林克……你终于回来了。','一百年的沉睡，海拉鲁已经变了。','去解放四神兽吧，它们在等待你。','记住，塞尔达一直在城堡里牵制着盖侬。']},
+    {x:LANDMARKS.kakariko.x-10, z:LANDMARKS.kakariko.z+4, name:'帕雅', color:0x6a8a9a, type:'villager',
+     lines:['英帕大人一直在等你。','村庄周围能看到守护者的巡逻，小心。','如果你收集到克洛格种子，可以来找我玩。']},
+  ]);
+  buildVillage(LANDMARKS.hateno.x, LANDMARKS.hateno.z, '哈特诺村', 'normal', [
+    {x:LANDMARKS.hateno.x+7, z:LANDMARKS.hateno.z-5, name:'普尔亚', color:0xd8c8a8, type:'researcher',
+     lines:['希卡之石的功能，我已经解析了一部分。','你可以在背包里查看你的装备。','如果找到古代零件，记得带回来给我。','加油吧，勇者。']},
+    {x:LANDMARKS.hateno.x-8, z:LANDMARKS.hateno.z+3, name:'村民', color:0x8a7a5a, type:'villager',
+     lines:['哈特诺是个安静的村子。','听说东边的山顶有个研究所。','……你身上的衣服真特别。']},
+  ]);
+  buildVillage(LANDMARKS.zora.x, LANDMARKS.zora.z, '卓拉领地', 'zora', [
+    {x:LANDMARKS.zora.x+6, z:LANDMARKS.zora.z-4, name:'卓拉守卫', color:0x4a7a9a, type:'guard',
+     lines:['欢迎来到卓拉领地，林克。','水之神兽就在北边，但被灾厄占据了。','米法大人……她一直在等你。']},
+  ]);
+  buildVillage(LANDMARKS.goron.x, LANDMARKS.goron.z, '鼓隆城', 'goron', [
+    {x:LANDMARKS.goron.x+6, z:LANDMARKS.goron.z-4, name:'鼓隆族', color:0x8a5a3a, type:'villager',
+     lines:['火之神兽就在死亡之山的火山口！','那地方太热了，不过你是勇者应该没问题。','达尔克尔大人是我们的骄傲！']},
+  ]);
+  buildVillage(LANDMARKS.gerudoTown.x, LANDMARKS.gerudoTown.z, '格鲁德小镇', 'gerudo', [
+    {x:LANDMARKS.gerudoTown.x+6, z:LANDMARKS.gerudoTown.z-4, name:'格鲁德守卫', color:0xc87848, type:'guard',
+     lines:['你是……男性？这里是女性城镇，请勿入内。','（看来你需要特殊通行证）','雷之神兽就在西南的沙漠深处。']},
+  ]);
+  buildVillage(LANDMARKS.rito.x, LANDMARKS.rito.z, '利特村', 'rito', [
+    {x:LANDMARKS.rito.x+6, z:LANDMARKS.rito.z-4, name:'利特族', color:0x8a9aaa, type:'villager',
+     lines:['风之神兽还在雪山之上盘旋。','力巴尔大人……他的灵魂还未安息。','如果你要上去，记得带上防寒装备。']},
+  ]);
+
+  const gp=LANDMARKS.greatPlateau;
+  // 初始台地上的固定场景：遗迹、营地与几棵树
+  try{
+    makeRuins(gp.x+58,gp.z+78);
+    makeRuins(gp.x-72,gp.z+22);
+    makeCampfire(gp.x+28,gp.z-40);
+    makeCampTent(-108,585,0.7);
+    makeCampfire(-102,589);
+    makeTempleOfTime(gp.x+78,gp.z+82);
+    makePlateauGate(gp.x+34,gp.z+31);
+    makeCave(gp.x-94,gp.z+37,'初始台地 · 遗忘洞窟',0.25,1);
+    makePath([[-100,606],[-98,592],[-92,570],[-84,542],[-78,522],[-72,504]],3.3,'plateau-path-overlook');
+    makePath([[-170,400],[-155,413],[-144,429],[-130,443],[-116,456],[-95,475],[-80,492],[-72,504]],4.0,'plateau-path-main');
+    makePath([[-157,419],[-142,408],[-118,395],[-94,382],[-78,372]],2.7,'plateau-path-east');
+    makePath([[-183,418],[-204,434],[-225,450],[-241,460]],2.5,'plateau-path-west');
+    makeSignpost(-86,588,'初始台地');
+    // A small lookout on the ridge: stones, wildflowers and framing pines.
+    for(const [tx,tz] of [[-130,610],[-63,611],[-143,592],[-48,592],[-119,634],[-73,635],[-127,565],[-58,552],[-137,548],[-50,570]]){
+      if(!isWater(tx,tz)&&terrainHeight(tx,tz)<210) makePineTree(tx,tz);
+    }
+    for(const [tx,tz] of [[-128,584],[-52,585],[-141,622],[-62,622],[-155,568],[-44,604],[-112,560]]){
+      if(!isWater(tx,tz)&&terrainHeight(tx,tz)<210) makeTree(tx,tz);
+    }
+    for(let i=0;i<5;i++){
+      const a=rand(0,6.28), r=rand(9,16);
+      const rx=-100+Math.cos(a)*r, rz=600+Math.sin(a)*r;
+      if(terrainSlope(rx,rz)<0.9 && Math.abs(rx+100)>2.8) makeRock(rx,rz,rand(0.22,0.5));
+    }
+    [[gp.x-120,gp.z+70],[gp.x-95,gp.z-95],[gp.x+110,gp.z+15],[gp.x+75,gp.z-85],[gp.x-40,gp.z+130],
+     [gp.x-104,gp.z+44],[gp.x+15,gp.z+58],[gp.x+50,gp.z+82],[gp.x-63,gp.z+84],[gp.x+93,gp.z+52]].forEach(([tx,tz],ti)=>{
+      if(!isWater(tx,tz)&&terrainHeight(tx,tz)<210){ if(ti%3===2) makePineTree(tx,tz); else makeTree(tx,tz); }
+    });
+  }catch(e){ console.warn('plateau landmark error',e); }
+  makeShrine(gp.x-90,gp.z-60,'图米恩科神庙',true,'tutorial');
+  makeShrine(gp.x+80,gp.z-50,'玛奥努神庙',false,'puzzle');
+  makeShrine(gp.x+100,gp.z+40,'加巴希夫神庙',false,'puzzle');
+  makeShrine(gp.x-40,gp.z+90,'瓦摩达伊神庙',false,'puzzle');
+  makeShrine(LANDMARKS.divineWater.x,LANDMARKS.divineWater.z,LANDMARKS.divineWater.name,false,'divine');
+  makeShrine(LANDMARKS.divineWind.x,LANDMARKS.divineWind.z,LANDMARKS.divineWind.name,false,'divine');
+  makeShrine(LANDMARKS.divineFire.x,LANDMARKS.divineFire.z,LANDMARKS.divineFire.name,false,'divine');
+  makeShrine(LANDMARKS.divineThunder.x,LANDMARKS.divineThunder.z,LANDMARKS.divineThunder.name,false,'divine');
+  makeShrine(LANDMARKS.masterSword.x,LANDMARKS.masterSword.z,LANDMARKS.masterSword.name,false,'master');
+  makeShrine(LANDMARKS.ganon.x,LANDMARKS.ganon.z,LANDMARKS.ganon.name,false,'ganon');
+  makeShrine(LANDMARKS.dlcShrine.x,LANDMARKS.dlcShrine.z,LANDMARKS.dlcShrine.name,false,'dlc');
+
+  makeNpc(-94, 590, '神秘老人', 0x9a7a50, [
+    '你终于醒了。',
+    '这里是初始台地，你是被选中的勇者。',
+    '一百年前，灾厄盖侬席卷海拉鲁。',
+    '四英杰战死，塞尔达公主独自在城堡中牵制着盖侬。',
+    '去解放四神兽，拔出大师之剑，然后去见她。',
+    '这是你的使命，林克。',
+  ], 'elder');
+
+  STABLE_POS.forEach(([x,z,name])=>{
+    if(isWater(x,z)) return;
+    makeNpc(x+4, z+3, '旅人', 0x7a6a4a, [
+      '这里有不少旅人经过。',
+      '马厩旁的马可以骑，靠近后按 E 就能上马。',
+      '听说北边的雪山上住着莱尼尔。',
+      '你看起来很强，一定是个冒险者吧。',
+      '如果食物不够，前面有驿站可以休息。',
+    ], 'merchant');
+  });
+
+  // Dense, hand-placed opening meadow.  The player wakes up in this clearing,
+  // so first impressions matter more here than anywhere else on the map.
+  for(let i=0;i<1100;i++){
+    const a=rand(0,Math.PI*2), r=Math.sqrt(Math.random())*42;
+    makeGrassTuft(gp.x+Math.cos(a)*r, gp.z+Math.sin(a)*r);
+  }
+  for(let i=0;i<1500;i++){
+    const a=rand(0,Math.PI*2), r=42+Math.sqrt(Math.random())*110;
+    makeGrassTuft(gp.x+Math.cos(a)*r, gp.z+Math.sin(a)*r);
+  }
+  for(let i=0;i<420;i++){
+    const a=rand(0,Math.PI*2), r=Math.sqrt(Math.random())*95;
+    makeFlower(gp.x+Math.cos(a)*r, gp.z+Math.sin(a)*r, FLOWER_COLORS);
+  }
+  for(let i=0;i<90;i++){
+    const a=rand(0,Math.PI*2), r=22+Math.sqrt(Math.random())*105;
+    makeBush(gp.x+Math.cos(a)*r, gp.z+Math.sin(a)*r);
+  }
+  // the overlook meadow where the player opens their eyes
+  for(let i=0;i<1200;i++){
+    const a=rand(0,Math.PI*2), r=Math.sqrt(Math.random())*38;
+    makeGrassTuft(-100+Math.cos(a)*r, 600+Math.sin(a)*r);
+  }
+  for(let i=0;i<1500;i++){
+    const a=rand(0,Math.PI*2), r=38+Math.sqrt(Math.random())*105;
+    makeGrassTuft(-100+Math.cos(a)*r, 600+Math.sin(a)*r);
+  }
+  for(let i=0;i<1800;i++){
+    const a=rand(0,Math.PI*2), r=Math.sqrt(Math.random())*55;
+    makeGrassTuft(-100+Math.cos(a)*r, 600+Math.sin(a)*r);
+  }
+  for(let i=0;i<500;i++){
+    const a=rand(0,Math.PI*2), r=Math.sqrt(Math.random())*110;
+    makeFlower(-100+Math.cos(a)*r, 600+Math.sin(a)*r, FLOWER_COLORS);
+  }
+  for(let i=0;i<75;i++){
+    const a=rand(0,Math.PI*2), r=10+Math.sqrt(Math.random())*80;
+    makeBush(-100+Math.cos(a)*r, 600+Math.sin(a)*r);
+  }
+  // village green belts
+  ['kakariko','hateno','zora','goron','gerudoTown','rito'].forEach((k,i)=>{
+    const l=LANDMARKS[k]; if(!l) return;
+    for(let j=0;j<24;j++){
+      const a=rand(0,6.28), r=24+Math.sqrt(Math.random())*36;
+      const x=l.x+Math.cos(a)*r, z=l.z+Math.sin(a)*r;
+      if(!isWater(x,z)&&terrainHeight(x,z)<220) makeTree(x,z);
+    }
+    for(let j=0;j<190;j++){
+      const a=rand(0,6.28), r=Math.sqrt(Math.random())*55;
+      makeGrassTuft(l.x+Math.cos(a)*r,l.z+Math.sin(a)*r);
+    }
+    for(let j=0;j<55;j++){
+      const a=rand(0,6.28), r=Math.sqrt(Math.random())*48;
+      makeFlower(l.x+Math.cos(a)*r,l.z+Math.sin(a)*r,[0xffe9b0,0xffd0e0,0xffc070]);
+    }
+    for(let j=0;j<12;j++){
+      const a=rand(0,6.28), r=16+Math.random()*44;
+      makeBush(l.x+Math.cos(a)*r,l.z+Math.sin(a)*r);
+    }
+  });
+  // a few landmark boulders to break up the horizon
+  for(const [bx,bz,bs] of [[-210,430,2.8],[-120,445,2.1],[-190,360,2.4],[-92,392,1.8]]) makeRock(bx,bz,bs);
+  buildScatteredVegetation();
+}
+await loadingStep(0.46,'生成村落、神庙与植被');
+scatterWorld();
+await loadingStep(0.64,'魔物正在苏醒');
+
+// ============================================================
+// ★ 马匹 / 骑乘
+// ============================================================
+function lerpAngle(a,b,t){
+  let d=(b-a)%(Math.PI*2);
+  if(d>Math.PI) d-=Math.PI*2; else if(d<-Math.PI) d+=Math.PI*2;
+  return a+d*t;
+}
+
+function buildHorseModel(def){
+  const g=new THREE.Group();
+  const coat=toon(def.coat,{shadowColor:new THREE.Color(def.coat).multiplyScalar(0.45).getHex(),steps:3,rimColor:0xffe8c0});
+  const coatDark=toon(new THREE.Color(def.coat).multiplyScalar(0.78).getHex(),{shadowColor:new THREE.Color(def.coat).multiplyScalar(0.35).getHex(),steps:3});
+  const mane=toon(def.mane,{shadowColor:new THREE.Color(def.mane).multiplyScalar(0.4).getHex(),steps:3,rimColor:0xffffff});
+  const hoof=toon(0x2a2520,{shadowColor:0x0a0806,steps:2});
+  const leather=toon(def.saddle,{shadowColor:new THREE.Color(def.saddle).multiplyScalar(0.45).getHex(),steps:3,rimColor:0xffcc88});
+  const metal=toon(0xc8c8d0,{shadowColor:0x5a5a68,steps:4,rimColor:0xffffff});
+  const eyeMat=new THREE.MeshStandardMaterial({color:0x1a1208,roughness:0.25});
+  const cloth=toon(def.blanket,{shadowColor:new THREE.Color(def.blanket).multiplyScalar(0.45).getHex(),steps:3,rimColor:0xffdd88});
+  const mesh=(geo,mat,cast=true)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=cast;return m;};
+
+  // 身体
+  const bodyGroup=new THREE.Group(); g.add(bodyGroup);
+  const barrel=mesh(new THREE.SphereGeometry(0.64,14,12),coat);
+  barrel.position.set(0,1.10,-0.05); barrel.scale.set(0.70,0.82,1.55); bodyGroup.add(barrel);
+  const chest=mesh(new THREE.SphereGeometry(0.55,12,10),coat);
+  chest.position.set(0,1.06,0.62); chest.scale.set(0.78,0.88,0.82); bodyGroup.add(chest);
+  const rump=mesh(new THREE.SphereGeometry(0.56,12,10),coat);
+  rump.position.set(0,1.08,-0.70); rump.scale.set(0.78,0.90,0.86); bodyGroup.add(rump);
+  const belly=mesh(new THREE.SphereGeometry(0.48,12,8),coatDark);
+  belly.position.set(0,0.82,0.0); belly.scale.set(0.72,0.62,1.35); bodyGroup.add(belly);
+
+  // 颈 / 头
+  const neck=new THREE.Group(); neck.position.set(0,1.30,0.67); neck.rotation.x=0.52; bodyGroup.add(neck);
+  const neckMesh=mesh(new THREE.CylinderGeometry(0.26,0.38,0.72,9),coat);
+  neckMesh.position.y=0.34; neck.add(neckMesh);
+  for(let i=0;i<5;i++){
+    const m=mesh(new THREE.ConeGeometry(0.10,0.34,4),mane,false);
+    m.position.set(0,0.12+i*0.13,-0.25); m.rotation.x=-0.55; neck.add(m);
+  }
+  const head=new THREE.Group(); head.position.set(0,0.72,0.02); head.rotation.x=-0.65; neck.add(head);
+  const skull=mesh(new THREE.SphereGeometry(0.24,12,10),coat);
+  skull.position.set(0,0.02,0.06); skull.scale.set(0.78,0.86,1.25); head.add(skull);
+  const muzzle=mesh(new THREE.BoxGeometry(0.22,0.19,0.30),coat);
+  muzzle.position.set(0,-0.035,0.32); muzzle.rotation.x=0.08; head.add(muzzle);
+  const nose=mesh(new THREE.SphereGeometry(0.115,8,6),coatDark);
+  nose.position.set(0,-0.045,0.45); nose.scale.set(1.0,0.8,0.7); head.add(nose);
+  for(const s of [-1,1]){
+    const nostril=mesh(new THREE.SphereGeometry(0.022,5,4),hoof,false);
+    nostril.position.set(s*0.06,-0.04,0.505); head.add(nostril);
+    const eye=mesh(new THREE.SphereGeometry(0.045,7,5),eyeMat,false);
+    eye.position.set(s*0.165,0.075,0.13); eye.scale.z=0.7; head.add(eye);
+    const ear=mesh(new THREE.ConeGeometry(0.055,0.20,5),coat);
+    ear.position.set(s*0.12,0.25,-0.04); ear.rotation.z=s*0.22; head.add(ear);
+    const earIn=mesh(new THREE.ConeGeometry(0.026,0.10,4),coatDark,false);
+    earIn.position.set(s*0.12,0.25,-0.025); earIn.rotation.z=s*0.22; head.add(earIn);
+  }
+  const brow=mesh(new THREE.BoxGeometry(0.24,0.035,0.10),coatDark,false);
+  brow.position.set(0,0.16,0.10); head.add(brow);
+  const forelock=mesh(new THREE.ConeGeometry(0.09,0.26,4),mane,false);
+  forelock.position.set(0,0.18,0.20); forelock.rotation.x=0.8; head.add(forelock);
+  // 笼头
+  const bridle=mesh(new THREE.TorusGeometry(0.23,0.012,4,14),leather,false);
+  bridle.rotation.x=Math.PI/2; bridle.position.set(0,-0.02,0.22); head.add(bridle);
+  const bit=mesh(new THREE.CylinderGeometry(0.012,0.012,0.24,5),metal,false);
+  bit.rotation.z=Math.PI/2; bit.position.set(0,-0.10,0.34); head.add(bit);
+  const reinGeo=new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(-0.12,-0.10,0.34),new THREE.Vector3(-0.34,-0.25,-0.35),new THREE.Vector3(-0.26,-0.10,-0.70)
+  ]);
+  const reinL=new THREE.Line(reinGeo,new THREE.LineBasicMaterial({color:0x3a2a1a})); head.add(reinL);
+
+  // 腿
+  const legs=[];
+  const legDefs=[
+    {x:-0.34,z:0.62,front:true,phase:0},
+    {x:0.34,z:0.62,front:true,phase:Math.PI},
+    {x:-0.34,z:-0.66,front:false,phase:Math.PI},
+    {x:0.34,z:-0.66,front:false,phase:0},
+  ];
+  for(const d of legDefs){
+    const hip=new THREE.Group(); hip.position.set(d.x,1.03,d.z); g.add(hip);
+    const upper=mesh(new THREE.CylinderGeometry(0.095,0.073,0.44,7),coat);
+    upper.position.y=-0.22; hip.add(upper);
+    const knee=new THREE.Group(); knee.position.y=-0.43; hip.add(knee);
+    const lower=mesh(new THREE.CylinderGeometry(0.068,0.052,0.54,7),coatDark);
+    lower.position.y=-0.27; knee.add(lower);
+    const hoofMesh=mesh(new THREE.BoxGeometry(0.13,0.12,0.18),hoof);
+    hoofMesh.position.set(0,-0.56,0.03); knee.add(hoofMesh);
+    const fetlock=mesh(new THREE.SphereGeometry(0.062,6,5),coatDark,false);
+    fetlock.position.y=-0.50; knee.add(fetlock);
+    legs.push({hip,knee,upper,lower,hoof:hoofMesh,phase:d.phase,front:d.front,side:d.x<0?-1:1});
+  }
+
+  // 尾巴
+  const tailRoot=new THREE.Group(); tailRoot.position.set(0,1.30,-0.88); tailRoot.rotation.x=-0.7; bodyGroup.add(tailRoot);
+  const tailSegs=[];
+  let tp=tailRoot;
+  for(let i=0;i<3;i++){
+    const seg=new THREE.Group(); seg.position.y=i===0?0:-0.22; tp.add(seg);
+    const m=mesh(new THREE.ConeGeometry(0.085-i*0.018,0.30,5),mane,false);
+    m.position.y=-0.15; m.rotation.x=0.08; seg.add(m);
+    tailSegs.push(seg); tp=seg;
+  }
+
+  // 鞍 / 缰 / 鞍袋
+  const saddle=new THREE.Group(); saddle.position.set(0,1.42,-0.04); g.add(saddle);
+  const blanket=mesh(new THREE.BoxGeometry(0.78,0.06,0.92),cloth);
+  blanket.position.y=-0.02; saddle.add(blanket);
+  const saddleBody=mesh(new THREE.BoxGeometry(0.54,0.14,0.52),leather);
+  saddleBody.position.y=0.07; saddle.add(saddleBody);
+  const pommel=mesh(new THREE.BoxGeometry(0.12,0.14,0.10),leather);
+  pommel.position.set(0,0.17,0.22); saddle.add(pommel);
+  const cantle=mesh(new THREE.BoxGeometry(0.32,0.13,0.08),leather);
+  cantle.position.set(0,0.17,-0.23); saddle.add(cantle);
+  const seatPad=mesh(new THREE.BoxGeometry(0.42,0.035,0.36),cloth,false);
+  seatPad.position.set(0,0.155,0.0); saddle.add(seatPad);
+  for(const s of [-1,1]){
+    const strap=mesh(new THREE.BoxGeometry(0.035,0.46,0.035),leather,false);
+    strap.position.set(s*0.31,-0.20,-0.05); strap.rotation.z=s*0.08; saddle.add(strap);
+    const stirrup=mesh(new THREE.TorusGeometry(0.09,0.018,4,12),metal,false);
+    stirrup.position.set(s*0.38,-0.45,-0.05); stirrup.rotation.y=Math.PI/2; saddle.add(stirrup);
+    const bag=mesh(new THREE.BoxGeometry(0.16,0.22,0.26),leather);
+    bag.position.set(s*0.40,-0.18,-0.30); bag.rotation.z=s*0.1; saddle.add(bag);
+    const bagTrim=mesh(new THREE.BoxGeometry(0.17,0.04,0.27),cloth,false);
+    bagTrim.position.set(s*0.40,-0.09,-0.30); saddle.add(bagTrim);
+  }
+  const girth=mesh(new THREE.TorusGeometry(0.62,0.025,5,16),leather,false);
+  girth.rotation.z=Math.PI/2; girth.position.set(0,1.05,0.0); girth.scale.set(0.82,1.1,1.35); g.add(girth);
+
+  g.position.copy(player.pos);
+  return {
+    group:g, bodyGroup, barrel, chest, rump, neck, head, mane, legs, tailRoot, tailSegs,
+    saddle, bodyMat:coat, maneMat:mane, saddleMat:leather,
+  };
+}
+
+function spawnHorse(x,z,def={}){
+  const coat=def.coat!==undefined?def.coat:0xd8c8a8;
+  const model=buildHorseModel({
+    coat, mane:def.mane!==undefined?def.mane:0x4a3020,
+    saddle:def.saddle!==undefined?def.saddle:0x4a2a18,
+    blanket:def.blanket!==undefined?def.blanket:0x8a2a2a,
+  });
+  const h=model;
+  h.name=def.name||'旅人马';
+  h.pos=new THREE.Vector3(x,terrainHeight(x,z),z);
+  h.yaw=def.yaw!==undefined?def.yaw:rand(0,Math.PI*2);
+  h.speed=0; h.vy=0; h.onGround=true; h.stamina=1.0; h.maxStamina=1.0;
+  h.bond=def.bond||100; h.ridden=false; h.wanderT=rand(2,8); h.wanderTarget=null;
+  h.phase=0; h.replaceT=0; h.blockT=0; h.graze=rand(0,3); h.exhausted=0;
+  h.home=new THREE.Vector3(x,terrainHeight(x,z),z);
+  h.anchor=h.home.clone();
+  h.group.position.copy(h.pos); h.group.rotation.y=h.yaw;
+  scene.add(h.group);
+  horses.push(h);
+  return h;
+}
+
+function spawnStableHorses(){
+  const COATS=[
+    {name:'白雪',coat:0xe8e2d4,mane:0xd8d0c0,saddle:0x5a3a28,blanket:0x8a2a2a},
+    {name:'栗风',coat:0x8a5a32,mane:0x3a2416,saddle:0x4a2a18,blanket:0x2a5a8a},
+    {name:'夜影',coat:0x2a2a30,mane:0x141418,saddle:0x3a2418,blanket:0x5a2a6a},
+    {name:'金鬃',coat:0xc8a860,mane:0xf0e0a0,saddle:0x5a3a20,blanket:0x8a5a2a},
+    {name:'山灵',coat:0x6a7a8a,mane:0x3a4a5a,saddle:0x3a2a20,blanket:0x2a6a5a},
+    {name:'赤焰',coat:0x9a4a32,mane:0x3a1810,saddle:0x3a2014,blanket:0xc8a040},
+    {name:'青岚',coat:0x5a7a6a,mane:0xe0e8e0,saddle:0x2a3a32,blanket:0x4a8a6a},
+    {name:'月牙',coat:0xd8d0c0,mane:0x8a8a90,saddle:0x2a2a3a,blanket:0x4a4a8a},
+  ];
+  let idx=0;
+  stables.forEach((s,i)=>{
+    const ang=i*1.7;
+    const x=s.pos.x+Math.cos(ang)*8.5, z=s.pos.z+Math.sin(ang)*8.5;
+    if(isWater(x,z)) return;
+    if(collidables.some(c=>Math.hypot(c.pos.x-x,c.pos.z-z)<c.radius+1.5)) return;
+    spawnHorse(x,z,COATS[idx%COATS.length]); idx++;
+  });
+  // 初始台地附近备一匹马，方便第一时间体验
+  let placed=false;
+  for(const [ox,oz] of [[5,4],[7,-3],[-6,5],[12,8],[-12,6]]){
+    if(isClearSpot(ox,oz,0.5)){ spawnHorse(ox,oz,COATS[0]); placed=true; break; }
+  }
+  if(!placed){ const sx=18,sz=16; if(!isWater(sx,sz)) spawnHorse(sx,sz,COATS[0]); }
+  const sx2=-22, sz2=12;
+  if(!isWater(sx2,sz2)) spawnHorse(sx2,sz2,COATS[1]);
+  // 初始台地附近也备一匹马
+  for(const [ox,oz] of [[-160,410],[-182,420],[-150,388]]){
+    if(isClearSpot(ox,oz,0.5)){ spawnHorse(ox,oz,COATS[4]); break; }
+  }
+}
+
+function findNearestHorse(maxD=5){
+  let best=null,bd=maxD;
+  for(const h of horses){
+    if(h.ridden) continue;
+    const d=h.pos.distanceTo(player.pos);
+    if(d<bd){bd=d;best=h;}
+  }
+  return best;
+}
+function isClearSpot(x,z,radius=0.6){
+  if(Math.abs(x)>HALF_X-35||Math.abs(z)>HALF_Z-35) return false;
+  if(isWater(x,z)) return false;
+  if(terrainSlope(x,z)>1.35) return false;
+  for(const c of collidables){
+    if(c.type==='chest'||c.type==='signpost') continue;
+    if(Math.hypot(c.pos.x-x,c.pos.z-z) < c.radius+radius+0.2) return false;
+  }
+  return true;
+}
+
+function mountHorse(h){
+  if(!h||player.riding||player.state==='dead') return;
+  if(h.pos.distanceTo(player.pos)>5.2){ toast('离马匹太远'); return; }
+  activeHorse=h; lastHorse=h;
+  quest.horseMounted=true;
+  player.riding=true; player.horse=h; h.ridden=true; h.speed=0;
+  player.vel.set(0,0,0); player.impulse.set(0,0,0);
+  player.shieldUp=false; player.aiming=false; player.climbing=false; player.gliding=false;
+  player.surfing=0; player.onGround=true;
+  if(document.pointerLockElement) $('crosshair').style.display='none';
+  // 把玩家挂到马背上
+  h.group.add(player.group);
+  player.group.position.set(0,0.74,-0.02);
+  player.group.rotation.set(0,0,0);
+  player.parts.slope.rotation.set(0,0,0);
+  player.pos.copy(h.pos); player.yaw=h.yaw;
+  player.mountedT=0;
+  camDist=Math.max(camDist,11);
+  toast('骑乘 · '+h.name+'  （Shift 疾驰 / 空格 跳跃 / E 下马）');
+  SFX.jump(); SFX.footstep();
+}
+
+function dismountHorse(silent=false){
+  if(!player.riding||!activeHorse) return;
+  const h=activeHorse;
+  const yaw=h.yaw;
+  const candidates=[
+    {x:h.pos.x+Math.cos(yaw)*1.45,z:h.pos.z-Math.sin(yaw)*1.45},
+    {x:h.pos.x-Math.cos(yaw)*1.45,z:h.pos.z+Math.sin(yaw)*1.45},
+    {x:h.pos.x-Math.sin(yaw)*1.8,z:h.pos.z-Math.cos(yaw)*1.8},
+    {x:h.pos.x+Math.sin(yaw)*1.8,z:h.pos.z+Math.cos(yaw)*1.8},
+  ];
+  let spot=candidates.find(c=>isClearSpot(c.x,c.z))||candidates[0];
+  scene.add(player.group);
+  const gy=terrainHeight(spot.x,spot.z);
+  player.group.position.set(spot.x,gy+0.02,spot.z);
+  player.group.rotation.set(0,yaw,0);
+  player.pos.set(spot.x,gy+0.02,spot.z);
+  player.yaw=yaw; player.vel.set(0,0,0);
+  player.riding=false; player.horse=null; h.ridden=false; h.speed=0; h.anchor=h.pos.clone();
+  activeHorse=null;
+  player.parts.slope.rotation.set(0,0,0);
+  if(!silent) toast('下马 · '+h.name);
+}
+
+function whistleHorse(){
+  if(player.riding){ dismountHorse(); return; }
+  if(player.state==='dead') return;
+  SFX.jump(); tone(880,0.18,'sine',0.04,440);
+  const near=findNearestHorse(5.2);
+  if(near){ mountHorse(near); return; }
+  let best=null,bd=9999;
+  horses.forEach(h=>{ if(h.ridden) return; const d=h.pos.distanceTo(player.pos); if(d<bd){bd=d;best=h;} });
+  if(!best){ toast('附近没有马匹'); return; }
+  if(bd>140){ toast('口哨声传不到那么远（'+Math.round(bd)+'m）'); return; }
+  // 召唤到玩家身后
+  let tx=player.pos.x-Math.sin(player.yaw)*3.2, tz=player.pos.z-Math.cos(player.yaw)*3.2;
+  if(!isClearSpot(tx,tz)){
+    tx=player.pos.x+Math.cos(player.yaw)*2.4; tz=player.pos.z-Math.sin(player.yaw)*2.4;
+  }
+  if(!isClearSpot(tx,tz)){ toast('这里没有马匹落脚的地方'); return; }
+  playTeleportFX(best.pos.clone(),0x88ccff,0.7);
+  best.pos.set(tx,terrainHeight(tx,tz),tz);
+  best.anchor=best.pos.clone();
+  best.yaw=player.yaw;
+  best.group.position.copy(best.pos); best.group.rotation.y=best.yaw;
+  playTeleportFX(best.pos.clone(),0x88ccff,0.9);
+  lastHorse=best;
+  toast('吹哨 · '+best.name+' 跑来了（再按 H 上马）');
+}
+
+function resolveHorseCollisions(h){
+  for(const c of collidables){
+    if(c.type==='chest'||c.type==='signpost') continue;
+    if(!c.radius) continue;
+    const oBot=c.pos.y, oTop=c.pos.y+c.height;
+    if(h.pos.y+0.15>oTop || h.pos.y+1.6<oBot) continue;
+    const dx=h.pos.x-c.pos.x, dz=h.pos.z-c.pos.z;
+    const d=Math.hypot(dx,dz), minD=c.radius+0.62;
+    if(d<minD&&d>0.0001){
+      const push=(minD-d);
+      h.pos.x+=dx/d*push; h.pos.z+=dz/d*push;
+      h.speed*=0.35;
+    }
+  }
+}
+
+function updateRiding(dt){
+  const h=activeHorse;
+  if(!h){ player.riding=false; return; }
+  player.mountedT+=dt;
+  player.invuln=Math.max(0,player.invuln-dt);
+  player.exhausted=Math.max(0,player.exhausted-dt);
+  player.landT=Math.max(0,(player.landT||0)-dt);
+  player.stamina=Math.min(player.maxStamina,player.stamina+dt*0.18);
+  player.atkBuff=Math.max(0,player.atkBuff-dt);
+  player.defBuff=Math.max(0,player.defBuff-dt);
+  player.speedBuff=Math.max(0,player.speedBuff-dt);
+  player.stealthBuff=Math.max(0,player.stealthBuff-dt);
+  if(player.atkBuff<=0) player.buffLevels.atk=0;
+  if(player.defBuff<=0) player.buffLevels.def=0;
+  if(player.speedBuff<=0) player.buffLevels.spd=0;
+  player.wet=Math.max(0,player.wet-dt);
+  if(player.cold<0) player.cold=Math.min(0,player.cold+dt);
+  if(player.heat<0) player.heat=Math.min(0,player.heat+dt);
+  player.attackTimer=Math.max(0,player.attackTimer-dt);
+  if(player.attackTimer<=0) player.attackCombo=0;
+  player.arrowCD=Math.max(0,player.arrowCD-dt);
+  player.hurtShake=Math.max(0,player.hurtShake-dt);
+  RUNES.forEach(r=>r.cdLeft=Math.max(0,r.cdLeft-dt));
+
+  const camFwd=new THREE.Vector3(-Math.sin(camYaw),0,-Math.cos(camYaw)).normalize();
+  const camRight=new THREE.Vector3(camFwd.z,0,-camFwd.x);
+  let ix=0,iz=0;
+  if(keys['KeyW']) iz-=1; if(keys['KeyS']) iz+=1; if(keys['KeyA']) ix-=1; if(keys['KeyD']) ix+=1;
+  const moving=(ix!==0||iz!==0);
+  const wantGallop=keys['ShiftLeft']&&iz<0&&h.stamina>0.03&&(h.exhausted||0)<=0;
+  const maxSpeed=wantGallop?21:8.2;
+  let targetSpeed=0;
+  if(iz<0) targetSpeed=maxSpeed;
+  else if(iz>0) targetSpeed=-3.2;
+  else if(ix!==0) targetSpeed=3.0;
+  h.speed=lerp(h.speed,targetSpeed,1-Math.exp(-2.8*dt));
+  if(Math.abs(h.speed)<0.04) h.speed=0;
+
+  if(moving){
+    const dir=camFwd.clone().multiplyScalar(-iz).add(camRight.clone().multiplyScalar(ix));
+    if(dir.lengthSq()>0.001){
+      const targetYaw=Math.atan2(dir.x,dir.z);
+      h.yaw=lerpAngle(h.yaw,targetYaw,1-Math.exp(-(wantGallop?3.6:4.8)*dt));
+    }
+  }
+  // 疾驰耗马匹精力
+  if(wantGallop&&Math.abs(h.speed)>4) h.stamina=Math.max(0,h.stamina-dt*0.115);
+  else h.stamina=Math.min(1,h.stamina+dt*0.16);
+  if(h.stamina<=0) h.exhausted=1.4;
+  h.exhausted=Math.max(0,(h.exhausted||0)-dt);
+
+  // 跳跃
+  if(keys['Space']&&h.onGround){
+    keys['Space']=false;
+    h.vy=8.4; h.onGround=false; SFX.jump();
+    emitParticles(sparkSys,h.pos.x,h.pos.y+0.4,h.pos.z,10,3,0.4,new THREE.Color(0xd8c8a0));
+  }
+  h.vy-=GRAVITY*dt;
+  const moveX=Math.sin(h.yaw)*h.speed*dt, moveZ=Math.cos(h.yaw)*h.speed*dt;
+  const steps=Math.max(1,Math.ceil(Math.hypot(moveX,moveZ)/0.45));
+  const sx=moveX/steps, sz=moveZ/steps;
+  let blocked=false;
+  for(let i=0;i<steps;i++){
+    const oldX=h.pos.x, oldZ=h.pos.z;
+    h.pos.x+=sx; h.pos.z+=sz;
+    resolveHorseCollisions(h);
+    const depth=WATER_LEVEL-terrainHeight(h.pos.x,h.pos.z);
+    if(depth>1.25){
+      h.pos.x=oldX; h.pos.z=oldZ; blocked=true;
+      h.speed=0;
+      if((h.blockT||0)<=0){ toast('马匹不肯进入深水'); h.blockT=3; }
+      break;
+    }
+  }
+  h.blockT=Math.max(0,(h.blockT||0)-dt);
+  const wasGroundH=h.onGround;
+  h.pos.y+=h.vy*dt;
+  let floor=groundHeightAt(h.pos.x,h.pos.z,0.62);
+  for(const w of walkSurfaces){
+    const dx=h.pos.x-w.x, dz=h.pos.z-w.z;
+    const lx=dx*Math.cos(-w.angle)-dz*Math.sin(-w.angle);
+    const lz=dx*Math.sin(-w.angle)+dz*Math.cos(-w.angle);
+    if(Math.abs(lx)<w.halfL&&Math.abs(lz)<w.halfW&&h.pos.y>w.y-1.0&&h.pos.y<w.y+3.2) floor=Math.max(floor,w.y);
+  }
+  if(h.pos.y<=floor){ h.pos.y=floor; h.vy=0; h.onGround=true; }
+  else if(wasGroundH&&h.vy<=0&&h.pos.y-floor<1.15){ h.pos.y=floor; h.vy=0; h.onGround=true; }
+  else if(h.pos.y>floor+0.1) h.onGround=false;
+  h.pos.x=clamp(h.pos.x,-HALF_X+35,HALF_X-35);
+  h.pos.z=clamp(h.pos.z,-HALF_Z+35,HALF_Z-35);
+  if(blocked) h.speed=0;
+
+  h.group.position.copy(h.pos);
+  h.group.rotation.y=h.yaw;
+  const slope=terrainSlope(h.pos.x,h.pos.z);
+  h.group.rotation.x=lerp(h.group.rotation.x,clamp(-terrainSlopeZ(h.pos.x,h.pos.z)*0.6,-0.25,0.25),1-Math.exp(-4*dt));
+  h.group.rotation.z=lerp(h.group.rotation.z,clamp(terrainSlopeX(h.pos.x,h.pos.z)*0.6,-0.25,0.25),1-Math.exp(-4*dt));
+
+  player.pos.copy(h.pos); player.yaw=h.yaw; player.onGround=h.onGround;
+  player.group.position.set(0,0.74,-0.02);
+  player.group.rotation.set(0,0,0);
+  player.group.visible=true;
+
+  animateHorse(h,dt,Math.abs(h.speed)>0.3,Math.abs(h.speed));
+  animatePlayer(dt,false,false);
+  updateHorseHUD();
+
+  // 骑乘时仍可攻击 / 射击
+  if(player.aiming) $('crosshair').style.display='block';
+  if(player.parts.bowHand) player.parts.bowHand.visible=player.aiming;
+  if(player.parts.bowBack) player.parts.bowBack.visible=!player.aiming;
+  updateChampionSkills(dt);
+}
+
+function animateHorse(h,dt,moving,speed){
+  h.phase+=dt*(moving?3.0+speed*0.55:1.2);
+  const now=performance.now()*0.001;
+  const gait=clamp(speed/20,0,1);
+  const amp=moving?(0.28+gait*0.62):0;
+  for(const leg of h.legs){
+    const s=Math.sin(h.phase+leg.phase);
+    leg.hip.rotation.x=s*amp;
+    leg.knee.rotation.x=Math.max(0,-s)*amp*1.35+(moving?0.04:0.015);
+    leg.hoof.rotation.x=-s*0.25;
+  }
+  const bob=moving?Math.abs(Math.sin(h.phase*2))*0.035*(0.5+gait):Math.sin(now*1.3)*0.006;
+  h.bodyGroup.position.y=bob;
+  h.neck.rotation.x=0.52+(moving?Math.sin(h.phase*2)*0.045:Math.sin(now*0.9)*0.02);
+  h.head.rotation.x=-0.65+(moving?Math.sin(h.phase*2+0.4)*0.06:Math.sin(now*0.7)*0.03);
+  if(!moving){
+    h.graze-=dt;
+    if(h.graze<0){ h.graze=rand(5,10); }
+    const graze=clamp(1-Math.abs(h.graze-3)/2,0,1);
+    h.neck.rotation.x=0.52+graze*0.55;
+  }
+  const tailSway=Math.sin(now*1.7+h.phase*0.2)*0.22;
+  h.tailRoot.rotation.z=tailSway;
+  h.tailRoot.rotation.x=-0.7+Math.sin(now*1.1)*0.10;
+  h.tailSegs.forEach((s,i)=>{ s.rotation.z=tailSway*(0.5+i*0.2); s.rotation.x=0.1+Math.sin(now*1.3+i)*0.12; });
+  h.saddle.rotation.z=lerp(h.saddle.rotation.z,clamp((h.speed||0)*0.004,-0.08,0.08),1-Math.exp(-3*dt));
+  // 鞍具随身体轻微起伏
+  h.saddle.position.y=1.42+bob*0.4;
+}
+
+function updateHorses(dt){
+  for(const h of horses){
+    if(h===activeHorse) continue;
+    if(h.ridden) continue;
+    h.phase+=dt*1.1;
+    h.wanderT-=dt;
+    const near=player.pos.distanceTo(h.pos)<8;
+    if(near){
+      const to=player.pos.clone().sub(h.pos); to.y=0;
+      const targetYaw=Math.atan2(to.x,to.z);
+      h.yaw=lerpAngle(h.yaw,targetYaw,1-Math.exp(-1.2*dt));
+      h.speed=lerp(h.speed,0,1-Math.exp(-3*dt));
+    } else if(h.wanderT<=0){
+      h.wanderT=rand(7,15);
+      const ang=rand(0,Math.PI*2), d=rand(2,7);
+      const tx=h.home.x+Math.cos(ang)*d, tz=h.home.z+Math.sin(ang)*d;
+      if(!isWater(tx,tz)&&isClearSpot(tx,tz,0.4)) h.wanderTarget={x:tx,z:tz};
+    } else if(h.wanderTarget){
+      const to=new THREE.Vector3(h.wanderTarget.x-h.pos.x,0,h.wanderTarget.z-h.pos.z);
+      if(to.length()<0.6){ h.wanderTarget=null; }
+      else{
+        to.normalize();
+        h.yaw=lerpAngle(h.yaw,Math.atan2(to.x,to.z),1-Math.exp(-1.5*dt));
+        h.speed=lerp(h.speed,1.2,1-Math.exp(-2*dt));
+        h.pos.x+=Math.sin(h.yaw)*h.speed*dt;
+        h.pos.z+=Math.cos(h.yaw)*h.speed*dt;
+        if(isWater(h.pos.x,h.pos.z)){ h.pos.x-=Math.sin(h.yaw)*h.speed*dt; h.pos.z-=Math.cos(h.yaw)*h.speed*dt; h.wanderTarget=null; }
+      }
+    } else {
+      h.speed=lerp(h.speed,0,1-Math.exp(-4*dt));
+    }
+    const floor=terrainHeight(h.pos.x,h.pos.z);
+    h.pos.y=floor;
+    h.group.position.copy(h.pos);
+    h.group.rotation.y=h.yaw;
+    animateHorse(h,dt,h.speed>0.2,h.speed);
+  }
+  updateHorseHUD();
+}
+
+function updateHorseHUD(){
+  const hud=$('horseHud'); if(!hud) return;
+  const h=activeHorse;
+  const near=h?null:findNearestHorse(9);
+  if(h||near){
+    hud.style.display='block';
+    const hh=h||near;
+    $('hhName').textContent=hh.name+(h?' · 骑乘中':'');
+    $('hhSub').textContent=`速度 ${Math.round(Math.abs(hh.speed)*3.6)} km/h · 羁绊 ${hh.bond||100}%`;
+    const spurs=$('hhSpurs');
+    if(spurs.children.length!==5){
+      spurs.innerHTML='';
+      for(let i=0;i<5;i++){ const d=document.createElement('span'); d.className='hh-spur'; spurs.appendChild(d); }
+    }
+    const lit=Math.max(0,Math.ceil((hh.stamina||0)*5));
+    [...spurs.children].forEach((el,i)=>el.classList.toggle('on',i<lit));
+    $('hhSpeed').style.width=clamp(Math.abs(hh.speed)/21*100,0,100)+'%';
+  } else hud.style.display='none';
+}
+
+let _hintT=0, _hintText='';
+function updateInteractHint(){
+  const el=$('interactHint'); if(!el) return;
+  if(dialogActive||mapOpen||invOpen||cookOpen||journalOpen||player.state==='dead'||teleporting){ el.classList.remove('on'); return; }
+  const now=performance.now();
+  if(now-_hintT<100) return;
+  _hintT=now;
+  let text='';
+  if(heldProp) text='放下 · '+heldProp.label+'（左键投掷）';
+  else if(ridingCycle) text='下车 · 大师摩托 Zero';
+  else if(player.riding) text='下马 · '+(activeHorse?activeHorse.name:'马');
+  else {
+    const near=findNearestHorse(5.2);
+    if(near) text='骑乘 · '+near.name+'（H 吹哨）';
+    if(!text&&masterCycle&&masterCycle.group.visible&&masterCycle.pos.distanceTo(player.pos)<4.2) text='骑乘 · 大师摩托 Zero';
+    if(!text){
+      for(const npc of npcs){ if(npc.pos.distanceTo(player.pos)<4.5){ text='对话 · '+npc.name; break; } }
+    }
+    if(!text){
+      const nearProp=nearestPhysicsProp(4.2);
+      if(nearProp) text='拾取 · '+nearProp.label+(nearProp.metal?'（金属）':'');
+    }
+    if(!text){
+      for(const t of towers){ if(t.pos.distanceTo(player.pos)<9){ text=t.activated?'希卡塔 · '+t.name:'启动希卡塔 · '+t.name; break; } }
+    }
+    if(!text){
+      for(const c of campfires){ if(c.pos&&c.pos.distanceTo(player.pos)<4.6){ text='烹饪 · 营火'; break; } }
+    }
+    if(!text){
+      for(const ore of caveOres){ if(!ore.collected&&ore.pos.distanceTo(player.pos)<3.2){ text='采集 · 矿床'; break; } }
+    }
+    if(!text){
+      for(const st of goddessStatues){ if(st.pos.distanceTo(player.pos)<4.2){ text=st.used?'祈祷 · 女神像':'祈祷 · 海利亚女神像'; break; } }
+    }
+    if(!text){
+      for(const cv of caves){ if(cv.pos.distanceTo(player.pos)<11){ text='洞穴 · '+cv.name; break; } }
+    }
+    if(!text){
+      for(const spot of memorySpots){ if(!spot.collected&&spot.pos.distanceTo(player.pos)<5){ text='回忆 · 塞尔达的记忆'; break; } }
+    }
+    if(!text){
+      for(const k of koroks){ if(!k.collected&&k.pos.distanceTo(player.pos)<4){ text='发现 · 呀哈哈'; break; } }
+    }
+    if(!text){
+      for(const s of shrines){
+        if(s.type==='ganon') continue;
+        const r=s.type==='master'?8:7;
+        if(s.pos.distanceTo(player.pos)<r){
+          if(s.type==='master') text=hasMasterSword?(quest.trialSwordTier>=3?'大师之剑 · 试炼完成':'剑之试炼 · 开始第'+(quest.trialSwordTier+1)+'层'):'台座 · 大师之剑';
+          else if(s.type==='dlc') text=quest.dlcActive?(quest.dlcStage>=3?'导师的试炼 · 回生之祠':'英杰之诗 · 回生之祠'):'开始 · 英杰之诗';
+          else if(s.type==='divine'){
+            const id=DIVINE_ID_BY_SHRINE[s.name];
+            if(id&&!quest.divineCleared[id]) text='神兽 · '+s.name;
+            else if(quest.dlcActive&&quest.dlcStage===2&&id&&!quest.dlcSongs[id]) text='英杰之歌 · '+s.name;
+            else text='神兽 · '+s.name;
+          } else text='接触 · '+s.name;
+          break;
+        }
+      }
+    }
+    if(!text){
+      const gs=shrines.find(s=>s.type==='ganon');
+      if(gs&&gs.pos.distanceTo(player.pos)<18) text='挑战 · 灾厄盖侬';
+    }
+    if(!text){
+      for(const c of chests){ if(!c.opened&&c.pos.distanceTo(player.pos)<4){ text='打开 · 宝箱'; break; } }
+    }
+    if(!text) text='观察四周';
+  }
+  if(text!==_hintText){ _hintText=text; $('interactText').textContent=text; }
+  el.classList.add('on');
+}
+
+function updateHorseHUDVisibility(){
+  const hud=$('horseHud'); if(!hud) return;
+  if(!activeHorse&&!findNearestHorse(9)) hud.style.display='none';
+}
+
+spawnStableHorses();
+
+// ============================================================
+// ★ 物理世界：刚体、可拾取物、投掷与爆炸冲击
+// ============================================================
+const physics = new window.BOTWPhysics.World({
+  gravity: -27,
+  terrainHeight: terrainHeight,
+  iterations: 7,
+  maxSubSteps: 3,
+});
+const physicsProps=[];
+let heldProp=null;
+let carryCooldown=0;
+let physicsAccum=0;
+const PHYS_EFFECT={};
+
+function grantMaterial(id,qty){
+  let m=inventory.materials.find(x=>x.id===id);
+  if(m){ m.qty+=qty; return m; }
+  const def=MATERIAL_DEFS.find(x=>x.id===id)||{id:id,name:id,eff:null,desc:'在旅途中获得。'};
+  m={...def,qty:qty}; inventory.materials.push(m); return m;
+}
+
+function buildBarrelModel(){
+  const g=new THREE.Group();
+  const wood=toon(0x8a5a32,{shadowColor:0x3a2210,steps:3,rimColor:0xffc888});
+  const woodDark=toon(0x5a351c,{shadowColor:0x241208,steps:3});
+  const iron=toon(0x4a4a50,{shadowColor:0x1a1a20,steps:4,rimColor:0xbbccdd});
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.42,0.46,0.94,12,1,false),wood);
+  body.castShadow=true; body.receiveShadow=true; g.add(body);
+  // stave seams
+  for(let i=0;i<12;i++){
+    const a=i/12*Math.PI*2;
+    const seam=new THREE.Mesh(new THREE.BoxGeometry(0.024,0.86,0.022),woodDark);
+    seam.position.set(Math.cos(a)*0.435,0,Math.sin(a)*0.435);
+    seam.rotation.y=-a; seam.castShadow=false; g.add(seam);
+  }
+  for(const y of [-0.31,0.31]){
+    const hoop=new THREE.Mesh(new THREE.TorusGeometry(0.445,0.028,5,18),iron);
+    hoop.rotation.x=Math.PI/2; hoop.position.y=y; hoop.castShadow=true; g.add(hoop);
+  }
+  const lid=new THREE.Mesh(new THREE.CylinderGeometry(0.365,0.365,0.035,12),woodDark);
+  lid.position.y=0.48; lid.castShadow=true; g.add(lid);
+  const bung=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.045,0.03,6),iron);
+  bung.position.set(0.16,0.49,0.10); g.add(bung);
+  mergeStaticGroup(g);
+  return g;
+}
+
+function buildCrateModel(metal){
+  const g=new THREE.Group();
+  const mat=metal?toon(0x66707a,{shadowColor:0x242c34,steps:4,rimColor:0xaaddff}):toon(0x9a6a3a,{shadowColor:0x3a2410,steps:3,rimColor:0xffcc88});
+  const edge=metal?toon(0xb8c4cc,{shadowColor:0x3a444c,steps:4,rimColor:0xffffff}):toon(0x4a3018,{shadowColor:0x1a0e06,steps:3});
+  const box=new THREE.Mesh(new THREE.BoxGeometry(0.86,0.82,0.86),mat);
+  box.castShadow=true; box.receiveShadow=true; g.add(box);
+  // plank battens + corner caps
+  for(let i=0;i<4;i++){
+    const a=i*Math.PI/2;
+    const batten=new THREE.Mesh(new THREE.BoxGeometry(0.09,0.84,0.06),edge);
+    batten.position.set(Math.sin(a)*0.445,0,Math.cos(a)*0.445);
+    batten.rotation.y=a; g.add(batten);
+  }
+  const band=new THREE.Mesh(new THREE.BoxGeometry(0.90,0.07,0.90),edge);
+  g.add(band);
+  if(metal){
+    const bandGlow=new THREE.Mesh(new THREE.BoxGeometry(0.88,0.035,0.88),
+      new THREE.MeshStandardMaterial({color:0x66ddff,emissive:0x1188bb,emissiveIntensity:1.4,roughness:0.25}));
+    g.add(bandGlow);
+  } else {
+    const nailMat=toon(0x2a2a2e,{steps:2});
+    for(const sx of [-1,1]) for(const sy of [-0.23,0.23]) for(const sz of [-1,1]){
+      const nail=new THREE.Mesh(new THREE.SphereGeometry(0.025,5,4),nailMat);
+      nail.position.set(sx*0.44,sy,sz*0.44); g.add(nail);
+    }
+  }
+  g.children.forEach(c=>{ if(c.isMesh) c.castShadow = c.castShadow !== false; });
+  mergeStaticGroup(g);
+  return g;
+}
+
+function buildBoulderModel(){
+  const g=new THREE.Group();
+  const rockMat=toon(0x777268,{shadowColor:0x2e2c28,steps:4,rimColor:0xaab0b8});
+  const mossMat=toon(0x58743a,{shadowColor:0x24320f,steps:3});
+  const rock=new THREE.Mesh(new THREE.DodecahedronGeometry(0.54,1),rockMat);
+  rock.scale.set(1.12,0.9,1.02); rock.castShadow=true; rock.receiveShadow=true; g.add(rock);
+  for(let i=0;i<5;i++){
+    const moss=new THREE.Mesh(new THREE.IcosahedronGeometry(rand(0.13,0.25),0),mossMat);
+    const a=rand(0,6.28), r=rand(0.28,0.48);
+    moss.position.set(Math.cos(a)*r,rand(0.05,0.35),Math.sin(a)*r);
+    moss.scale.y=0.45; g.add(moss);
+  }
+  mergeStaticGroup(g);
+  return g;
+}
+
+function buildAncientCubeModel(){
+  const g=new THREE.Group();
+  const shell=toon(0xcbd6dc,{shadowColor:0x4a5a66,steps:4,rimColor:0xffffff});
+  const glow=new THREE.MeshStandardMaterial({color:0x66ddff,emissive:0x2299dd,emissiveIntensity:2.3,roughness:0.15,metalness:0.2});
+  const box=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.8,0.8),shell);
+  box.castShadow=true; g.add(box);
+  for(const axis of ['x','y','z']) for(const s of [-1,1]){
+    const band=new THREE.Mesh(new THREE.TorusGeometry(0.41,0.025,5,4),glow);
+    if(axis==='x') band.rotation.y=Math.PI/2;
+    if(axis==='z') band.rotation.x=Math.PI/2;
+    band.rotation.z+=Math.PI/4;
+    g.add(band);
+  }
+  const coreMat=glow.clone();
+  const core=new THREE.Mesh(new THREE.OctahedronGeometry(0.22,0),coreMat);
+  core.name='ancient-core';
+  g.add(core);
+  mergeStaticGroup(g);
+  return g;
+}
+
+function addPhysicsProp(kind,x,z,opts={}){
+  const gh=terrainHeight(x,z);
+  let group, bodyOpts, radius, mass, label, y=gh;
+  if(kind==='barrel'){
+    group=buildBarrelModel(); radius=0.44; mass=6; label='木桶';
+    y=gh+0.5;
+    bodyOpts={shape:'sphere',radius:radius,mass:mass,position:{x,y,z},restitution:0.18,friction:0.82};
+  } else if(kind==='crate'||kind==='metalCrate'){
+    const metal=kind==='metalCrate';
+    group=buildCrateModel(metal); radius=0.43; mass=metal?9:5.5; label=metal?'金属宝箱':'木箱';
+    y=gh+0.435;
+    bodyOpts={shape:'box',half:{x:0.43,y:0.41,z:0.43},mass:mass,position:{x,y,z},restitution:0.12,friction:0.72};
+  } else if(kind==='boulder'){
+    group=buildBoulderModel(); radius=0.54; mass=14; label='岩石'; y=gh+0.52;
+    bodyOpts={shape:'sphere',radius:radius,mass:mass,position:{x,y,z},restitution:0.22,friction:0.85};
+  } else {
+    group=buildAncientCubeModel(); radius=0.42; mass=3; label='古代方块'; y=gh+0.42;
+    bodyOpts={shape:'sphere',radius:radius,mass:mass,position:{x,y,z},restitution:0.25,friction:0.55};
+  }
+  group.name='physics-'+kind;
+  group.position.set(x,y,z);
+  if(opts.ry) group.rotation.y=opts.ry;
+  scene.add(group);
+  bodyOpts.sleeping=true;
+  bodyOpts.canBreak=(kind==='barrel'||kind==='crate');
+  bodyOpts.userData={kind:kind,label:label};
+  const body=physics.addBody(bodyOpts);
+  body.position.y=y;
+  const prop={kind,group,body,radius,mass,label,broken:false,synced:true,lastHit:-99,dmgCD:0,metal:kind==='metalCrate'||kind==='ancientCube'};
+  // Align the visual to the just-created orientation
+  group.quaternion.set(body.q.x,body.q.y,body.q.z,body.q.w);
+  physicsProps.push(prop);
+  return prop;
+}
+
+function spawnPhysicsProps(){
+  const gp=LANDMARKS.greatPlateau;
+  // ridge camp at the new starting vista
+  addPhysicsProp('barrel',-92,596.5);
+  addPhysicsProp('barrel',-90.6,594.4,{ry:0.8});
+  addPhysicsProp('crate',-106.4,595.1,{ry:0.2});
+  addPhysicsProp('crate',-108.1,597.2,{ry:-0.3});
+  addPhysicsProp('metalCrate',-105.6,591.4,{ry:0.5});
+  addPhysicsProp('boulder',-88.2,603.2);
+  addPhysicsProp('ancientCube',-111.7,601.5);
+  // camp around the old plateau start, deliberately close so physics is discoverable
+  addPhysicsProp('barrel',-158.5,396.6);
+  addPhysicsProp('barrel',-157.3,398.2,{ry:0.4});
+  addPhysicsProp('barrel',-160.0,398.5,{ry:1.1});
+  addPhysicsProp('crate',-164.2,391.4,{ry:0.24});
+  addPhysicsProp('crate',-162.0,389.6,{ry:-0.5});
+  addPhysicsProp('metalCrate',-166.5,394.2,{ry:0.7});
+  addPhysicsProp('boulder',-156.2,404.2);
+  addPhysicsProp('ancientCube',-167.3,402.0);
+  // Great Plateau ruins / temple cache
+  addPhysicsProp('barrel',-225,456); addPhysicsProp('crate',-221,459); addPhysicsProp('metalCrate',-218,453);
+  // stables and villages get supply props
+  stables.forEach((s,i)=>{
+    if(!s || !s.pos) return;
+    const a=1.3+i*0.9;
+    addPhysicsProp(i%3===0?'metalCrate':'barrel',s.pos.x+Math.cos(a)*9,s.pos.z+Math.sin(a)*9);
+    addPhysicsProp('crate',s.pos.x+Math.cos(a+0.5)*10.5,s.pos.z+Math.sin(a+0.5)*10.5);
+  });
+  LANDMARKS && ['kakariko','hateno','zora','goron','gerudoTown','rito'].forEach((k,i)=>{
+    const l=LANDMARKS[k]; if(!l) return;
+    addPhysicsProp('barrel',l.x+6+i,l.z+9);
+    addPhysicsProp('crate',l.x-7,l.z+8+i*0.4);
+  });
+}
+
+function nearestPhysicsProp(maxDist){
+  let best=null,bd=maxDist;
+  for(const p of physicsProps){
+    if(p.broken||p===heldProp) continue;
+    const d=Math.hypot(p.body.position.x-player.pos.x,p.body.position.z-player.pos.z);
+    if(d<bd && Math.abs(p.body.position.y-player.pos.y)<3.0){ bd=d;best=p; }
+  }
+  return best;
+}
+
+function beginCarry(prop){
+  if(!prop||prop.broken) return;
+  heldProp=prop; prop.body.sleeping=true; prop.body.velocity.x=prop.body.velocity.y=prop.body.velocity.z=0;
+  prop.body.omega.x=prop.body.omega.y=prop.body.omega.z=0;
+  prop.body.held=true; carryCooldown=0.25;
+  $('carryHud').classList.add('on');
+  $('carryName').textContent=prop.label;
+  const el=$('carryHud');
+  SFX.loot();
+  toast('拾取 · '+prop.label+'（左键投掷 / E 放下）');
+}
+function endCarry(throwIt){
+  const prop=heldProp; if(!prop) return;
+  heldProp=null; prop.body.held=false; prop.body.sleeping=false; prop.body.wake();
+  const fwd=new THREE.Vector3(Math.sin(player.yaw),0.18,Math.cos(player.yaw)).normalize();
+  const origin=player.pos.clone().add(new THREE.Vector3(0,1.55,0)).add(fwd.clone().multiplyScalar(1.3));
+  prop.body.position.x=origin.x; prop.body.position.y=origin.y; prop.body.position.z=origin.z;
+  if(throwIt){
+    const power=prop.mass>8?11:16;
+    prop.body.velocity.x=fwd.x*power; prop.body.velocity.y=4.2+power*0.13; prop.body.velocity.z=fwd.z*power;
+    prop.body.omega.x=rand(-7,7); prop.body.omega.y=rand(-5,5); prop.body.omega.z=rand(-7,7);
+    prop.lastHit=performance.now()/1000;
+    SFX.swingHeavy();
+    toast('投掷 · '+prop.label);
+  } else {
+    prop.body.velocity.x=0; prop.body.velocity.y=0; prop.body.velocity.z=0;
+    toast('放下 · '+prop.label);
+  }
+  prop.group.position.set(prop.body.position.x,prop.body.position.y,prop.body.position.z);
+  $('carryHud').classList.remove('on');
+}
+
+function breakPhysicsProp(prop){
+  if(!prop||prop.broken) return;
+  prop.broken=true;
+  SFX.break();
+  const p=prop.body.position;
+  emitParticles(sparkSys,p.x,p.y+0.3,p.z,45,8,1.1,new THREE.Color(prop.metal?0x88ddff:0xcc8844));
+  emitParticles(fireSys,p.x,p.y+0.3,p.z,15,5,0.7,new THREE.Color(prop.metal?0x66ccff:0x884422));
+  const loot=prop.kind==='barrel'?['apple','hearty_radish','pumpkin']:['rushroom','silent_princess','hydromelon'];
+  const id=loot[randInt(0,loot.length-1)];
+  grantMaterial(id,randInt(1,2));
+  if(prop.kind==='metalCrate'||prop.kind==='ancientCube') grantMaterial('guardian_gear',1);
+  if(heldProp===prop) endCarry(false);
+  scene.remove(prop.group);
+  physics.removeBody(prop.body);
+  toast('打碎 · '+prop.label+' · 获得素材');
+}
+
+function updatePhysicsProps(dt){
+  if(carryCooldown>0) carryCooldown-=dt;
+  // held prop floats ahead of the player
+  if(heldProp){
+    heldProp.body.sleeping=true;
+    const fwd=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
+    const anchor=player.pos.clone().add(new THREE.Vector3(0,1.35+Math.sin(performance.now()*0.003)*0.045,0)).addScaledVector(fwd,1.25);
+    const b=heldProp.body;
+    const k=1-Math.exp(-12*dt);
+    b.position.x=lerp(b.position.x,anchor.x,k); b.position.y=lerp(b.position.y,anchor.y,k); b.position.z=lerp(b.position.z,anchor.z,k);
+    b.velocity.x=b.velocity.y=b.velocity.z=0; b.omega.x=b.omega.y=b.omega.z=0;
+    heldProp.group.position.set(b.position.x,b.position.y,b.position.z);
+    heldProp.group.quaternion.set(b.q.x,b.q.y,b.q.z,b.q.w);
+  }
+  // fixed-step physics
+  physics.step(dt);
+  const now=performance.now()/1000;
+  for(const p of physicsProps){
+    if(p.broken) continue;
+    const b=p.body;
+    const nearPlayer=Math.hypot(b.position.x-player.pos.x,b.position.z-player.pos.z);
+    p.group.visible=(p===heldProp)||nearPlayer<115;
+    // The player can shove light props with their body, and fast props hurt.
+    if(p!==heldProp&&nearPlayer<1.25&&Math.abs(b.position.y-player.pos.y)<1.8){
+      const moving=keys['KeyW']||keys['KeyA']||keys['KeyS']||keys['KeyD'];
+      if(moving){
+        const dx=b.position.x-player.pos.x, dz=b.position.z-player.pos.z;
+        const inv=1/Math.max(nearPlayer,0.001);
+        b.wake(); b.velocity.x+=dx*inv*22*dt; b.velocity.z+=dz*inv*22*dt; b.velocity.y+=1.2*dt;
+      }
+      const propSpeed=Math.hypot(b.velocity.x,b.velocity.z);
+      if(propSpeed>8&&performance.now()/1000-p.lastHit>0.6){
+        p.lastHit=performance.now()/1000;
+        damagePlayer(1);
+        emitParticles(sparkSys,b.position.x,b.position.y,b.position.z,15,4,0.5,new THREE.Color(0xffeecc));
+      }
+    }
+    p.group.position.set(b.position.x,b.position.y,b.position.z);
+    if(p.kind==='barrel'||p.kind==='boulder'){
+      p.group.quaternion.set(b.q.x,b.q.y,b.q.z,b.q.w);
+    } else {
+      p.group.quaternion.set(b.q.x,b.q.y,b.q.z,b.q.w);
+    }
+    if(p.kind==='ancientCube'){
+      p.group.rotation.y+=0.3*dt;
+      const core=p.group.getObjectByName('ancient-core');
+      if(core) core.rotation.y+=dt*1.7;
+    }
+    // damage monsters / bosses with fast-moving props
+    if(p!==heldProp){
+      const sp=Math.hypot(b.velocity.x,b.velocity.y,b.velocity.z);
+      if(sp>5.2 && now-p.lastHit>0.35){
+        for(const m of monsters){
+          if(m.state==='dead') continue;
+          const d=Math.hypot(b.position.x-m.pos.x,b.position.z-m.pos.z);
+          if(d<p.radius+1.4 && Math.abs(b.position.y-(m.pos.y+1))<2.6){
+            const dmg=Math.floor(sp*p.mass*0.95);
+            if(m.type==='divineBoss') damageDivineBoss(m,dmg,m.pos);
+            else if(m.type==='ganon') damageGanon(dmg,m.pos);
+            else damageMonster(m,dmg,m.pos,sp>10);
+            emitParticles(sparkSys,b.position.x,b.position.y,b.position.z,24,6,0.6,new THREE.Color(0xffddaa));
+            b.velocity.x*=0.4; b.velocity.z*=0.4; p.lastHit=now;
+            if((p.kind==='barrel'||p.kind==='crate') && sp>9) p.body.pendingBreak=true;
+            break;
+          }
+        }
+      }
+    }
+    if(b.position.y<-30||b.position.y>500||Math.abs(b.position.x)>HALF_X+200||Math.abs(b.position.z)>HALF_Z+200){
+      b.position.x=LANDMARKS.greatPlateau.x; b.position.z=LANDMARKS.greatPlateau.z; b.position.y=terrainHeight(b.position.x,b.position.z)+2;
+      b.velocity.x=b.velocity.y=b.velocity.z=0; b.wake();
+    }
+    if(b.pendingBreak){ b.pendingBreak=false; breakPhysicsProp(p); }
+  }
+}
+
+physics.onImpact=function(body, other, speed, point){
+  if(speed<7.5) return;
+  if(body && body.canBreak && Math.random()<0.6) body.pendingBreak=true;
+};
+
+// Initial supply props
+spawnPhysicsProps();
+
+// ============================================================
+// 任务 / 英杰
+// ============================================================
+const quest={
+  stage:'tutorial',
+  divineCleared:{water:false,wind:false,fire:false,thunder:false},
+  memoriesFound:0,totalMemories:13,masterSwordPulled:false,ganonDefeated:false,
+  dlcActive:false,dlcStage:0,dlcMasterCycle:false,
+  dlcCampsCleared:0,
+  dlcSongs:{water:false,wind:false,fire:false,thunder:false},
+  mazKoshiaDefeated:false,
+  trialSwordTier:0,
+  cookedCount:0,
+  virtualShrines:[],
+  spiritOrbs:0,
+};
+const QUEST_LINES={
+  tutorial:{main:'初始台地',subs:['与老人对话了解使命','完成四座神庙试炼','离开台地，前往四神兽']},
+  divine:{main:'解放四神兽',subs:['水之神兽 · 瓦·露塔','风之神兽 · 瓦·梅德','火 / 雷之神兽 · 剩余']},
+  masterSword:{main:'大师之剑',subs:['收集13颗心之容器','前往克洛格森林','从台座拔出大师之剑']},
+  ganon:{main:'讨伐灾厄盖侬',subs:['进入海拉鲁城堡','击败灾厄盖侬（第一阶段）','击败魔兽盖侬（第二阶段）']},
+  end:{main:'海拉鲁的和平',subs:['灾厄已消散','自由探索海拉鲁','—']},
+};
+function updateQuestHUD(){
+  if(quest.dlcActive){
+    const songKeys=['water','wind','fire','thunder'];
+    const songNames={water:'米法',wind:'力巴尔',fire:'达尔克尔',thunder:'乌尔波扎'};
+    const nSongs=Object.values(quest.dlcSongs).filter(Boolean).length;
+    let main='英杰之诗',subs=[],done=[];
+    if(quest.dlcStage<=1){
+      main='英杰之诗 · 必杀之剑';
+      subs=['清除四座试炼营地',`营地 ${quest.dlcCampsCleared||0}/4`,'返回回生之祠聆听英杰之歌'];
+      done=[(quest.dlcCampsCleared||0)>=4,(quest.dlcCampsCleared||0)>=4,false];
+    } else if(quest.dlcStage===2){
+      main='英杰之诗 · 四英杰之歌';
+      subs=[`米法的诗 · ${quest.dlcSongs.water?'完成':'未完成'}`,`力巴尔的诗 · ${quest.dlcSongs.wind?'完成':'未完成'}`,`达尔克尔 / 乌尔波扎 ${((quest.dlcSongs.fire?1:0)+(quest.dlcSongs.thunder?1:0))}/2`];
+      done=[quest.dlcSongs.water,quest.dlcSongs.wind,quest.dlcSongs.fire&&quest.dlcSongs.thunder];
+    } else if(quest.dlcStage===3){
+      main='英杰之诗 · 导师的试炼';
+      subs=['四英杰之歌已完成','前往回生之祠','击败导师米兹·乔西亚'];
+      done=[nSongs>=4,nSongs>=4,quest.mazKoshiaDefeated];
+    } else {
+      main='英杰之诗 · 完成';
+      subs=['大师摩托 Zero 已获得','四英杰的灵魂得到安息','自由探索海拉鲁'];
+      done=[true,true,true];
+    }
+    $('qMain').textContent=main;
+    [...$('questPanel').querySelectorAll('.qsub')].forEach((el,i)=>{
+      if(i>=subs.length) el.style.display='none';
+      else { el.style.display=''; el.textContent=subs[i]; el.classList.toggle('done',!!done[i]); }
+    });
+    const extras=[`克洛格种子 ${player.korokSeeds}`,`试炼通过证 ${player.trialPass}`];
+    if(quest.spiritOrbs>0) extras.push(`灵魂宝珠 ${quest.spiritOrbs}`);
+    extras.push('英杰之歌 '+songKeys.map(k=>(quest.dlcSongs[k]?'♪':'·')).join(''));
+    if(quest.mazKoshiaDefeated) extras.push('导师已击败');
+    $('qExtra').textContent=extras.join(' · ');
+    updateWeaponHUD();
+    return;
+  }
+  const q=QUEST_LINES[quest.stage]||QUEST_LINES.tutorial;
+  $('qMain').textContent=q.main;
+  [...$('questPanel').querySelectorAll('.qsub')].forEach((el,i)=>{
+    el.style.display='';
+    let text=q.subs[i]||'—',done=false;
+    if(quest.stage==='divine'){
+      if(i===0&&quest.divineCleared.water) done=true;
+      if(i===1&&quest.divineCleared.wind) done=true;
+      if(i===2){ const n=Object.values(quest.divineCleared).filter(Boolean).length; text=`已解放 ${n}/4 神兽`; done=n>=4; }
+    }
+    if(quest.stage==='masterSword'){
+      if(i===0){ text=`心之容器：${player.maxHp}/13`; done=player.maxHp>=13; }
+      if(i===1){ text='前往克洛格森林'; done=player.pos.distanceTo(new THREE.Vector3(LANDMARKS.masterSword.x,0,LANDMARKS.masterSword.z))<40; }
+      if(i===2){ text=hasMasterSword?'已拔出':'从台座拔剑'; done=hasMasterSword; }
+    }
+    if(quest.stage==='ganon'){
+      if(i===0) done=player.pos.distanceTo(new THREE.Vector3(LANDMARKS.ganon.x,0,LANDMARKS.ganon.z))<40;
+      if(i===1&&ganonPhase>=1) done=ganonHp<=0;
+      if(i===2&&ganonPhase>=2) done=ganonHp<=0;
+    }
+    el.textContent=text; el.classList.toggle('done',done);
+  });
+  const extras=[`克洛格种子 ${player.korokSeeds}`,`试炼通过证 ${player.trialPass}`];
+  if(quest.spiritOrbs>0) extras.push(`灵魂宝珠 ${quest.spiritOrbs}`);
+  if(quest.memoriesFound>0) extras.push(`回忆 ${quest.memoriesFound}/${quest.totalMemories}`);
+  if(quest.dlcActive) extras.push(`英杰之诗 阶段${quest.dlcStage}`);
+  $('qExtra').textContent=extras.join(' · ');
+  updateWeaponHUD();
+}
+function updateWeaponHUD(){
+  const w=currentWeapon;
+  $('wName').textContent=w?w.name+(w.elem?` [${({fire:'火',ice:'冰',thunder:'雷',light:'光'})[w.elem]}]`:''):'空手';
+  $('wDuraBar').style.width=(w&&isFinite(w.dur))?(w.curDur/w.dur*100)+'%':'100%';
+  $('shieldName').textContent=currentShield?currentShield.name+(currentShield.def?` (防${currentShield.def})`:''):'无';
+  updateWeaponVisual(); refreshShieldVisual();
+}
+updateQuestHUD();
+
+// ============================================================
+// ★ 任务目标引导（世界光柱 + HUD + 边缘箭头）
+// ============================================================
+const objBeacon = new THREE.Group();
+(function(){
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0x66ddff, transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+    depthWrite: false, blending: THREE.AdditiveBlending
+  });
+  const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 1.05, 42, 12, 1, true), mat);
+  beam.position.y = 25; objBeacon.add(beam); objBeacon.userData.beamMat = mat;
+  const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+  const cx = cv.getContext('2d');
+  cx.font = 'bold 110px sans-serif'; cx.textAlign = 'center'; cx.textBaseline = 'middle';
+  cx.fillStyle = '#7fd4ff'; cx.shadowColor = '#7fd4ff'; cx.shadowBlur = 30;
+  cx.fillText('◎', 64, 66);
+  const tex = new THREE.CanvasTexture(cv);
+  const icon = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: tex, transparent: true, depthWrite: false, depthTest: false
+  }));
+  icon.scale.set(3.5, 3.5, 1); icon.position.y = 52;
+  objBeacon.add(icon); objBeacon.userData.icon = icon;
+  objBeacon.visible = false; scene.add(objBeacon);
+})();
+
+function getObjective(){
+  if(quest.dlcActive && quest.dlcStage<=3){
+    if(quest.dlcStage<=1){
+      const camp=dlcCamps.find(c=>!c.cleared);
+      if(camp) return {x:camp.center.x,z:camp.center.z,name:'必杀之剑 · '+camp.name,icon:'⚔'};
+      return {x:LANDMARKS.dlcShrine.x,z:LANDMARKS.dlcShrine.z,name:'返回回生之祠',icon:'◆'};
+    }
+    if(quest.dlcStage===2){
+      const map={water:LANDMARKS.divineWater,wind:LANDMARKS.divineWind,fire:LANDMARKS.divineFire,thunder:LANDMARKS.divineThunder};
+      const label={water:'米法的诗',wind:'力巴尔的诗',fire:'达尔克尔的诗',thunder:'乌尔波扎的诗'};
+      const left=['water','wind','fire','thunder'].filter(k=>!quest.dlcSongs[k]);
+      if(left.length) return {x:map[left[0]].x,z:map[left[0]].z,name:'英杰之诗 · '+label[left[0]],icon:'♪'};
+    }
+    return {x:LANDMARKS.dlcShrine.x,z:LANDMARKS.dlcShrine.z,name:'导师的试炼',icon:'☯'};
+  }
+  if(quest.stage === 'tutorial'){
+    const elders = npcs.filter(n => n.type === 'elder' && !n.talked);
+    const elder = elders.find(n => n.name === '神秘老人') || elders[0];
+    if(elder) return { x: elder.pos.x, z: elder.pos.z, name: '与' + elder.name + '对话', icon: '!' };
+    const tuts = shrines.filter(s => (s.type === 'tutorial' || s.type === 'puzzle') && !s.challengeCleared);
+    if(tuts.length){
+      let best = null, bd = Infinity;
+      tuts.forEach(s => { const d = s.pos.distanceTo(player.pos); if(d < bd){ bd = d; best = s; } });
+      return { x: best.pos.x, z: best.pos.z, name: '试炼 · ' + best.name, icon: '◆' };
+    }
+    return { x: LANDMARKS.divineWater.x, z: LANDMARKS.divineWater.z, name: '前往卓拉领地', icon: '◆' };
+  }
+  if(quest.stage === 'divine'){
+    const map = { water: LANDMARKS.divineWater, wind: LANDMARKS.divineWind,
+                  fire: LANDMARKS.divineFire, thunder: LANDMARKS.divineThunder };
+    const label = { water: '水之神兽', wind: '风之神兽', fire: '火之神兽', thunder: '雷之神兽' };
+    const rem = Object.keys(quest.divineCleared).filter(k => !quest.divineCleared[k]);
+    if(rem.length){
+      let best = null, bd = Infinity;
+      rem.forEach(k => { const t = map[k]; const d = Math.hypot(t.x - player.pos.x, t.z - player.pos.z); if(d < bd){ bd = d; best = k; } });
+      const t = map[best];
+      return { x: t.x, z: t.z, name: '解放 ' + label[best], icon: '◆' };
+    }
+    return { x: LANDMARKS.masterSword.x, z: LANDMARKS.masterSword.z, name: '前往克洛格森林', icon: '🗡' };
+  }
+  if(quest.stage === 'masterSword')
+    return { x: LANDMARKS.masterSword.x, z: LANDMARKS.masterSword.z, name: '拔出大师之剑', icon: '🗡' };
+  if(quest.stage === 'ganon')
+    return { x: LANDMARKS.ganon.x, z: LANDMARKS.ganon.z, name: '讨伐灾厄盖侬', icon: '☠' };
+  return null;
+}
+
+const _objV=new THREE.Vector3(), _objWp=new THREE.Vector3();
+let _objUiT=0, _objNameCache='', _objDistCache='', _objIconCache='';
+function updateObjective(dt, clockT){
+  const obj = getObjective();
+  const hud = $('objectiveHud');
+  const arrow = $('objArrow');
+  if(!obj){ hud.style.display = 'none'; arrow.style.display = 'none'; objBeacon.visible = false; return; }
+
+  const gy = terrainHeight(obj.x, obj.z);
+  objBeacon.position.set(obj.x, gy, obj.z);
+  const distBeacon = player.pos.distanceTo(_objV.set(obj.x, gy, obj.z));
+  objBeacon.visible = distBeacon > 22;
+  objBeacon.userData.icon.position.y = 52 + Math.sin(clockT * 2) * 2.2;
+  objBeacon.userData.icon.material.rotation += dt * 1.2;
+  const pulse = 0.16 + Math.sin(clockT * 3) * 0.08;
+  objBeacon.userData.beamMat.opacity = pulse;
+
+  const d = player.pos.distanceTo(_objV.set(obj.x, gy, obj.z));
+  hud.style.display = 'flex';
+  const now=performance.now();
+  if(now-_objUiT>100){
+    _objUiT=now;
+    if(obj.icon!==_objIconCache){ _objIconCache=obj.icon; $('objIcon').textContent=obj.icon; }
+    if(obj.name!==_objNameCache){ _objNameCache=obj.name; $('objName').textContent=obj.name; }
+    const ds=Math.round(d)+'m';
+    if(ds!==_objDistCache){ _objDistCache=ds; $('objDist').textContent=ds; }
+  }
+
+  const wp = _objWp.set(obj.x, gy + 5, obj.z).project(camera);
+  const W = innerWidth, H = innerHeight;
+  let sx = (wp.x * .5 + .5) * W;
+  let sy = (-wp.y * .5 + .5) * H;
+  const onScreen = wp.z < 1 && sx > 40 && sx < W - 40 && sy > 40 && sy < H - 40;
+  arrow.style.display = onScreen ? 'none' : 'block';
+  if(!onScreen){
+    const cx = W / 2, cy = H / 2;
+    let dx = sx - cx, dy = sy - cy;
+    if(wp.z >= 1){ dx = -dx; dy = -dy; }
+    const ang = Math.atan2(dy, dx);
+    const r = Math.min(W, H) * 0.40;
+    sx = cx + Math.cos(ang) * r;
+    sy = cy + Math.sin(ang) * r;
+    arrow.style.transform = `translate(${sx}px, ${sy}px) translate(-50%,-50%) rotate(${ang}rad)`;
+  }
+}
+
+// ============================================================
+// 英杰
+// ============================================================
+const CHAMPION_DEFS=[
+  {id:'water',name:'米法的祈福',icon:'💧',color:'#66ccff',cdMax:180},
+  {id:'wind',name:'力巴尔的勇猛',icon:'🌪',color:'#aaddaa',cdMax:30},
+  {id:'fire',name:'达尔克尔的守护',icon:'🔥',color:'#ff8844',cdMax:25},
+  {id:'thunder',name:'乌尔波扎的愤怒',icon:'⚡',color:'#ffdd44',cdMax:35},
+];
+function grantChampionSkill(id){
+  if(championSkills.find(s=>s.id===id)) return;
+  const def=CHAMPION_DEFS.find(d=>d.id===id); if(!def) return;
+  championSkills.push({...def,cd:0}); SFX.champion();
+  playTeleportFX(player.pos.clone(),0x88e0ff,2.0); toast(`获得英杰技能 · ${def.name}`);
+  buildChampionHUD();
+}
+function buildChampionHUD(){
+  const hud=$('championHud'); hud.innerHTML='';
+  championSkills.forEach(s=>{
+    const el=document.createElement('div'); el.className='champ-slot ready';
+    el.innerHTML=`<span class="cs-icon" style="color:${s.color};background:${s.color}22">${s.icon}</span><span>${s.name}</span><span class="cs-cd"><div style="width:100%"></div></span>`;
+    hud.appendChild(el);
+  });
+}
+let _champUiT=0;
+function updateChampionSkills(dt){
+  championSkills.forEach(s=>{ if(s.cd>0) s.cd=Math.max(0,s.cd-dt); });
+  const now=performance.now();
+  if(now-_champUiT<120) return;
+  _champUiT=now;
+  [...$('championHud').children].forEach((el,i)=>{
+    const s=championSkills[i]; if(!s) return;
+    el.classList.toggle('ready',s.cd<=0);
+    const bar=el.querySelector('.cs-cd div');
+    if(bar){ const w=s.cd<=0?'100%':`${(1-s.cd/s.cdMax)*100}%`; if(bar.style.width!==w) bar.style.width=w; }
+  });
+}
+function useChampionSkill(){
+  if(player.state==='dead') return;
+  if(championSkills.length===0){ toast('尚未获得英杰技能'); return; }
+  const s=championSkills.find(s=>s.cd<=0);
+  if(!s){ toast('英杰技能冷却中'); return; }
+  s.cd=s.cdMax;
+  if(s.id==='wind'){ player.vel.y=18; player.onGround=false; player.gliding=false; player.galeT=3.5; emitParticles(sparkSys,player.pos.x,player.pos.y,player.pos.z,50,6,1.0,new THREE.Color(0xaaffaa)); toast('力巴尔的勇猛 · 上升气流'); }
+  else if(s.id==='fire'){ player.darukT=12; player.darukCharges=3; player.shieldUp=false; if(typeof darukBubble!=='undefined'&&darukBubble){ darukBubble.visible=true; } toast('达尔克尔的守护 · 三层护盾'); }
+  else if(s.id==='thunder'){
+    monsters.forEach(m=>{ if(m.state==='dead') return; if(m.pos.distanceTo(player.pos)<15){ damageMonster(m,200,m.pos); emitParticles(sparkSys,m.pos.x,m.pos.y+2,m.pos.z,60,8,0.8,new THREE.Color(0xffdd44)); } });
+    emitParticles(sparkSys,player.pos.x,player.pos.y,player.pos.z,120,12,1.0,new THREE.Color(0xffdd44)); toast('乌尔波扎的愤怒 · 范围雷电');
+  }
+  SFX.champion();
+}
+
+// ============================================================
+// 怪物
+// ============================================================
+const monsters=[];
+const monsterCompendium={};
+let bloodMoonT=0, bloodMoonTimer=240;
+function triggerBloodMoon(){
+  bloodMoonT=16;
+  toast('血月升起…魔物复活了');
+  SFX && SFX.thunder && SFX.thunder();
+  let revived=0;
+  monsters.forEach(m=>{
+    if(m.state!=='dead') return;
+    if(m.type==='guardian'||m.type==='flyingGuardian'||m.type==='ganon'||m.type==='divineBoss'||m.type==='mazKoshia') return;
+    if(m.dlcCamp!==undefined||m.dlcSong) return;
+    m.state='patrol'; m.hp=m.maxHp; m.deadT=0; m.alertLevel=0; m.attackCD=1.5; m.staggerT=0;
+    if(!m.group.parent) scene.add(m.group);
+    m.group.visible=true;
+    m.group.rotation.set(0,m.group.rotation.y,0);
+    m.group.position.copy(m.pos);
+    if(m.parts){
+      if(m.parts.armL) m.parts.armL.rotation.set(0,0,0.35);
+      if(m.parts.armR) m.parts.armR.rotation.set(0,0,-0.35);
+    }
+    revived++;
+  });
+  playTeleportFX(player.pos.clone(),0xff3355,2.0);
+  emitParticles(sparkSys,player.pos.x,player.pos.y+2,player.pos.z,120,14,1.4,new THREE.Color(0xff3355));
+  if(revived) toast('血月升起…'+revived+' 只魔物复活了');
+}
+function registerCompendium(name,meta){ if(!monsterCompendium[name]) monsterCompendium[name]={name,...meta}; }
+
+function ensureMonsterHpEl(m){
+  if(m.hpEl) return;
+  if(m.type==='ganon'||m.type==='divineBoss') return;
+  const elite = (m.type==='lynel'||m.type==='stoneTalus'||m.type==='moblin'||m.type==='guardian'||m.type==='flyingGuardian');
+  const el=document.createElement('div');
+  el.className='monster-hp'+(elite?' elite':'');
+  el.innerHTML='<div class="mhp-name"></div><div class="mhp-track"><div class="mhp-fill"></div></div>';
+  el.querySelector('.mhp-name').textContent = m.displayName || '魔物';
+  $('monsterHpLayer').appendChild(el);
+  m.hpEl=el; m.hpFill=el.querySelector('.mhp-fill');
+}
+const _hpVec=new THREE.Vector3();
+let _mhpT=0;
+function updateMonsterHpBars(){
+  const now=performance.now();
+  if(now-_mhpT<60) return;
+  _mhpT=now;
+  monsters.forEach(m=>{
+    if(m.type==='ganon'||m.type==='divineBoss'){ return; }
+    if(m.state==='dead'){ if(m.hpEl) m.hpEl.style.display='none'; return; }
+    ensureMonsterHpEl(m);
+    if(!m.hpEl) return;
+    const d=m.pos.distanceTo(player.pos);
+    const visibleDist = m.hp < m.maxHp ? 48 : 22;
+    if(d > visibleDist){ m.hpEl.style.display='none'; return; }
+    _hpVec.copy(m.pos);
+    _hpVec.y += (m.type==='lynel'?4.8 : m.type==='stoneTalus'?6.4 : m.type==='guardian'?(m.variant==='decayed'?2.2:5.3) : m.type==='flyingGuardian'?3.5 : m.type==='moblin'?3.8 : m.type==='chuchu'?1.4 : 2.6);
+    _hpVec.project(camera);
+    if(_hpVec.z > 1){ m.hpEl.style.display='none'; return; }
+    const x=(_hpVec.x*0.5+0.5)*innerWidth;
+    const y=(-_hpVec.y*0.5+0.5)*innerHeight;
+    if(x<-60||x>innerWidth+60||y<-40||y>innerHeight+40){ m.hpEl.style.display='none'; return; }
+    m.hpEl.style.display='block';
+    m.hpEl.style.transform=`translate(${x}px, ${y}px) translate(-50%, -100%)`;
+    m.hpFill.style.width=clamp(m.hp/m.maxHp*100,0,100)+'%';
+  });
+}
+
+function buildBokoblin(level=1){
+  const g=new THREE.Group();
+  const cols=[0x8a2a2a,0x2a5a8a,0x2a2a2a,0xc0c0c0];
+  const skin=toon(cols[Math.min(level-1,3)],{shadowColor:0x3a1010,steps:3,rimColor:0xff8888});
+  const darkMat=toon(0x2a1a1a,{shadowColor:0x0a0505,steps:2});
+  const hornMat=toon(0xd8cfa8,{shadowColor:0x6a5a30,steps:3,rimColor:0xffffdd});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(0.55,8,7),skin);
+  body.scale.set(1,0.9,0.8); body.position.y=1.1; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.42,8,7),skin);
+  head.position.y=1.8; head.castShadow=true; g.add(head);
+  const snout=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.21,0.26,6),skin);
+  snout.rotation.x=Math.PI/2; snout.position.set(0,1.72,0.39); g.add(snout);
+  for(const s of [-1,1]){
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.03,4,3),darkMat)).position.set(s*0.07,1.72,0.53);
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.07,5,4),
+      new THREE.MeshStandardMaterial({color:0xffdd44,emissive:0xaa6600,emissiveIntensity:0.6}));
+    eye.position.set(s*0.17,1.9,0.34); g.add(eye);
+    const horn=new THREE.Mesh(new THREE.ConeGeometry(0.07,0.36,5),hornMat);
+    horn.position.set(s*0.24,2.16,0.03); horn.rotation.z=s*0.5; g.add(horn);
+  }
+  const armL=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.08,0.55,5),skin);
+  armL.position.set(-0.55,1.25,0); armL.rotation.z=0.35; armL.castShadow=true; g.add(armL);
+  const armR=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.08,0.55,5),skin);
+  armR.position.set(0.55,1.25,0); armR.rotation.z=-0.35; armR.castShadow=true; g.add(armR);
+  const legL=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.09,0.5,5),skin);
+  legL.position.set(-0.21,0.5,0); legL.castShadow=true; g.add(legL);
+  const legR=new THREE.Mesh(new THREE.CylinderGeometry(0.1,0.09,0.5,5),skin);
+  legR.position.set(0.21,0.5,0); legR.castShadow=true; g.add(legR);
+  return {group:g,armL,armR,legL,legR};
+}
+const BOKO_NAMES=['红色波克布林','蓝色波克布林','黑色波克布林','白银波克布林','黄金波克布林'];
+function spawnBokoblin(x,z,level=1){
+  const h=terrainHeight(x,z);
+  const parts=buildBokoblin(level);
+  parts.group.name='monster'; parts.group.position.set(x,h,z); scene.add(parts.group);
+  const hp=[13,48,130,360,550][Math.min(level-1,4)];
+  const name=BOKO_NAMES[Math.min(level-1,4)];
+  monsters.push({
+    type:'bokoblin',level,hp,maxHp:hp,group:parts.group,parts,displayName:name,
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),
+    state:'patrol',stateT:0,patrolAngle:rand(0,Math.PI*2),
+    patrolCenter:new THREE.Vector3(x,h,z),attackCD:0,staggerT:0,animT:0,
+    radius:0.7,speed:2.4+level*0.4,
+    damage:[0,6,12,24,48][Math.min(level,4)],aggroRange:14+level*2,
+    frozen:0,burning:0,shocked:0,alertLevel:0,stealthAware:level>=3,
+  });
+  registerCompendium(name,{type:'怪物',hp,desc:'最常见的魔物。'});
+}
+function spawnLizalfos(x,z,level=1,elem=null){
+  const g=new THREE.Group();
+  const cols=[0x6a8a3a,0x3a5a8a,0x2a2a2a,0xc0c0c0];
+  const skin=toon(cols[Math.min(level-1,3)],{shadowColor:0x1a2a0a,steps:3,rimColor:0xaaffaa});
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.28,0.7,4,6),skin);
+  body.position.y=1.4; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.ConeGeometry(0.23,0.7,5),skin);
+  head.position.set(0,1.95,0.15); head.rotation.x=0.3; head.castShadow=true; g.add(head);
+  for(const s of [-1,1]){
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.06,4,3),
+      new THREE.MeshStandardMaterial({color:0xffdd44,emissive:0xaa6600}));
+    eye.position.set(s*0.13,2.04,0.22); g.add(eye);
+  }
+  const armL=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.07,0.5,5),skin);
+  armL.position.set(-0.35,1.45,0); armL.rotation.z=0.4; g.add(armL);
+  const armR=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.07,0.5,5),skin);
+  armR.position.set(0.35,1.45,0); armR.rotation.z=-0.4; g.add(armR);
+  const legL=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.08,0.5,5),skin);
+  legL.position.set(-0.17,0.7,0); legL.castShadow=true; g.add(legL);
+  const legR=new THREE.Mesh(new THREE.CylinderGeometry(0.09,0.08,0.5,5),skin);
+  legR.position.set(0.17,0.7,0); legR.castShadow=true; g.add(legR);
+  const h=terrainHeight(x,z);
+  g.name='monster'; g.position.set(x,h,z); scene.add(g);
+  const hp=[44,96,210,520,800][Math.min(level-1,4)];
+  const name=(elem?({fire:'火',ice:'冰',thunder:'雷'})[elem]+'属性':'')+['红色蜥蜴战士','蓝色蜥蜴战士','黑色蜥蜴战士','白银蜥蜴战士','黄金蜥蜴战士'][Math.min(level-1,4)];
+  monsters.push({
+    type:'lizalfos',level,elem,hp,maxHp:hp,group:g,parts:{armL,armR,legL,legR,body,head},displayName:name,
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),
+    state:'patrol',stateT:0,patrolAngle:rand(0,Math.PI*2),
+    patrolCenter:new THREE.Vector3(x,h,z),attackCD:0,staggerT:0,animT:0,
+    radius:0.6,speed:2.6+level*0.3,
+    damage:[0,8,16,28,50][Math.min(level,4)],aggroRange:16+level*2,
+    frozen:0,burning:0,shocked:0,alertLevel:0,stealthAware:level>=2,
+  });
+  registerCompendium(name,{type:'怪物',hp,desc:'敏捷的蜥蜴型魔物。'});
+}
+// ============================================================
+// ★ 守护者：精细模型 / 巡逻 / 瞄准 / 古代激光 / 盾反
+// ============================================================
+const LASER_BEAM_GEO=new THREE.CylinderGeometry(1,1,1,6);
+const laserFXs=[];
+let guardianTipShown=false;
+function spawnLaserBeam(origin,end,color=0xff3300,width=0.12,life=0.20){
+  const dir=end.clone().sub(origin);
+  const len=Math.max(0.05,dir.length());
+  dir.normalize();
+  const group=new THREE.Group();
+  group.position.copy(origin);
+  group.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),dir);
+  const coreMat=new THREE.MeshBasicMaterial({color,transparent:true,opacity:0.95,blending:THREE.AdditiveBlending,depthWrite:false});
+  const core=new THREE.Mesh(LASER_BEAM_GEO,coreMat);
+  core.scale.set(width,len,width); core.position.y=len/2; group.add(core);
+  const glowMat=new THREE.MeshBasicMaterial({color,transparent:true,opacity:0.35,blending:THREE.AdditiveBlending,depthWrite:false});
+  const glow=new THREE.Mesh(LASER_BEAM_GEO,glowMat);
+  glow.scale.set(width*3.4,len,width*3.4); glow.position.y=len/2; group.add(glow);
+  scene.add(group);
+  laserFXs.push({group,coreMat,glowMat,life,maxLife:life});
+}
+function updateLaserFX(dt){
+  for(let i=laserFXs.length-1;i>=0;i--){
+    const f=laserFXs[i]; f.life-=dt;
+    const k=Math.max(0,f.life/f.maxLife);
+    f.coreMat.opacity=0.95*k; f.glowMat.opacity=0.35*k;
+    f.group.scale.x=f.group.scale.z=1+(1-k)*0.4;
+    if(f.life<=0){
+      scene.remove(f.group); f.coreMat.dispose(); f.glowMat.dispose();
+      laserFXs.splice(i,1);
+    }
+  }
+}
+function makeGuardianSight(){
+  const geo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);
+  const lineMat=new THREE.LineBasicMaterial({color:0xff2200,transparent:true,opacity:0.5,blending:THREE.AdditiveBlending,depthWrite:false});
+  const line=new THREE.Line(geo,lineMat); line.frustumCulled=false; line.visible=false; scene.add(line);
+  const ringMat=new THREE.MeshBasicMaterial({color:0xff2200,transparent:true,opacity:0.45,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});
+  const ring=new THREE.Mesh(new THREE.RingGeometry(0.85,1.12,24),ringMat);
+  ring.rotation.x=-Math.PI/2; ring.visible=false; ring.frustumCulled=false; scene.add(ring);
+  return {line,lineMat,linePos:geo.attributes.position,ring,ringMat};
+}
+
+function buildGuardianModel(variant='stalker'){
+  const g=new THREE.Group();
+  const metal=toon(variant==='decayed'?0x6a6a5a:0x9a9aa2,{shadowColor:0x3a3a42,steps:4,rimColor:0xddeeff,rimPower:2.2});
+  const dark=toon(variant==='decayed'?0x3a3a30:0x34343a,{shadowColor:0x101014,steps:3,rimColor:0x8899aa});
+  const accent=toon(0xc8b060,{shadowColor:0x5a4a1a,steps:4,rimColor:0xffffaa});
+  const eyeMat=new THREE.MeshStandardMaterial({color:0xff3a10,emissive:0xcc2200,emissiveIntensity:2.2,roughness:0.2});
+  const lensMat=new THREE.MeshStandardMaterial({color:0x220806,emissive:0x661100,emissiveIntensity:0.8,roughness:0.1,metalness:0.4});
+  const runeMat=new THREE.MeshBasicMaterial({color:0x66ccff,transparent:true,opacity:0.8,blending:THREE.AdditiveBlending,depthWrite:false});
+  const mossMat=toon(0x4a6a2a,{shadowColor:0x1a2a0a,steps:2});
+  const mesh=(geo,mat,cast=true)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=cast;return m;};
+  const bodyGroup=new THREE.Group(); g.add(bodyGroup);
+
+  // 主壳
+  const core=mesh(new THREE.CylinderGeometry(0.95,1.20,0.90,12),dark);
+  core.position.y=1.48; bodyGroup.add(core);
+  const coreRing=mesh(new THREE.TorusGeometry(1.0,0.055,6,18),accent,false);
+  coreRing.rotation.x=Math.PI/2; coreRing.position.y=1.07; bodyGroup.add(coreRing);
+  const lowerBowl=mesh(new THREE.SphereGeometry(0.92,14,8,0,Math.PI*2,Math.PI*0.5,Math.PI*0.5),metal);
+  lowerBowl.position.y=1.10; lowerBowl.scale.y=0.62; bodyGroup.add(lowerBowl);
+  const upperBowl=mesh(new THREE.SphereGeometry(1.0,16,10,0,Math.PI*2,0,Math.PI*0.52),metal);
+  upperBowl.position.y=1.95; upperBowl.scale.y=0.82; bodyGroup.add(upperBowl);
+  const belt=mesh(new THREE.CylinderGeometry(1.06,1.06,0.12,14,1,true),metal);
+  belt.position.y=1.72; bodyGroup.add(belt);
+  for(let i=0;i<8;i++){
+    const a=(i/8)*Math.PI*2;
+    const plate=mesh(new THREE.BoxGeometry(0.26,0.40,0.12),metal,false);
+    plate.position.set(Math.cos(a)*1.04,1.45,Math.sin(a)*1.04);
+    plate.rotation.y=-a+Math.PI/2; plate.rotation.z=0.05; bodyGroup.add(plate);
+    const glyph=mesh(new THREE.BoxGeometry(0.10,0.015,0.014),runeMat,false);
+    glyph.position.set(Math.cos(a)*1.10,1.62,Math.sin(a)*1.10); glyph.rotation.y=-a+Math.PI/2; bodyGroup.add(glyph);
+  }
+  // 内芯
+  const inner=mesh(new THREE.SphereGeometry(0.44,12,8),new THREE.MeshStandardMaterial({color:0x224466,emissive:0x2266aa,emissiveIntensity:1.2,roughness:0.3}),false);
+  inner.position.y=1.55; bodyGroup.add(inner);
+  // 底座喷口
+  for(let i=0;i<4;i++){
+    const a=(i/4)*Math.PI*2+Math.PI/4;
+    const vent=mesh(new THREE.CylinderGeometry(0.11,0.16,0.20,6),dark,false);
+    vent.position.set(Math.cos(a)*0.55,0.95,Math.sin(a)*0.55); vent.rotation.x=Math.PI; bodyGroup.add(vent);
+  }
+
+  // 头 / 眼
+  const headGroup=new THREE.Group(); headGroup.position.y=2.02; bodyGroup.add(headGroup);
+  const dome=mesh(new THREE.SphereGeometry(0.92,16,9,0,Math.PI*2,0,Math.PI*0.56),metal);
+  dome.position.y=0.18; headGroup.add(dome);
+  const domeBand=mesh(new THREE.CylinderGeometry(0.94,0.98,0.12,14,1,true),dark);
+  domeBand.position.y=0.06; headGroup.add(domeBand);
+  const eyeHousing=mesh(new THREE.CylinderGeometry(0.34,0.42,0.24,10),dark);
+  eyeHousing.rotation.x=Math.PI/2; eyeHousing.position.set(0,-0.02,0.84); headGroup.add(eyeHousing);
+  const eyeRing1=mesh(new THREE.TorusGeometry(0.30,0.045,6,18),metal,false);
+  eyeRing1.position.set(0,-0.02,0.96); headGroup.add(eyeRing1);
+  const eyeRing2=mesh(new THREE.TorusGeometry(0.21,0.028,5,16),accent,false);
+  eyeRing2.position.set(0,-0.02,1.00); headGroup.add(eyeRing2);
+  const eye=mesh(new THREE.SphereGeometry(0.19,12,9),eyeMat,false);
+  eye.position.set(0,-0.02,0.99); eye.scale.z=0.45; headGroup.add(eye);
+  const pupil=mesh(new THREE.SphereGeometry(0.075,8,6),lensMat,false);
+  pupil.position.set(0,-0.02,1.075); headGroup.add(pupil);
+  const eyeLight=new THREE.PointLight(0xff3300,2.2,14); eyeLight.position.set(0,-0.02,1.2); headGroup.add(eyeLight);
+  const petals=[];
+  for(let i=0;i<3;i++){
+    const a=(i/3)*Math.PI*2;
+    const pg=new THREE.Group();
+    pg.position.set(Math.cos(a)*0.38,Math.sin(a)*0.38,0.86);
+    pg.rotation.z=a;
+    const petal=mesh(new THREE.BoxGeometry(0.34,0.55,0.10),metal);
+    petal.position.set(0.18,0,0); pg.add(petal);
+    const ptip=mesh(new THREE.ConeGeometry(0.17,0.26,4),metal,false);
+    ptip.position.set(0.40,0,0); ptip.rotation.z=-Math.PI/2; pg.add(ptip);
+    headGroup.add(pg); petals.push(pg);
+  }
+  for(const s of [-1,1]){
+    const antenna=mesh(new THREE.CylinderGeometry(0.018,0.012,0.56,4),metal,false);
+    antenna.position.set(s*0.22,0.68,-0.20); antenna.rotation.z=s*0.20; headGroup.add(antenna);
+    const tip=mesh(new THREE.SphereGeometry(0.045,6,5),runeMat,false);
+    tip.position.set(s*0.28,0.96,-0.20); headGroup.add(tip);
+  }
+  const beamOrigin=new THREE.Object3D(); beamOrigin.position.set(0,-0.02,1.10); headGroup.add(beamOrigin);
+
+  // 六足
+  const legs=[];
+  if(variant!=='decayed'){
+    const legZ=[-0.64,0,0.64];
+    for(const side of [-1,1]){
+      for(let i=0;i<3;i++){
+        const hip=new THREE.Group();
+        hip.position.set(side*1.02,1.30,legZ[i]);
+        bodyGroup.add(hip);
+        const upper=mesh(new THREE.BoxGeometry(0.92,0.16,0.18),metal);
+        upper.position.set(side*0.44,0.02,0); hip.add(upper);
+        const knee=new THREE.Group(); knee.position.set(side*0.92,-0.04,0); hip.add(knee);
+        const joint=mesh(new THREE.SphereGeometry(0.13,7,6),accent,false);
+        knee.add(joint);
+        const lower=mesh(new THREE.CylinderGeometry(0.075,0.055,1.14,6),dark);
+        lower.position.y=-0.57; lower.rotation.z=side*0.10; knee.add(lower);
+        const shinArmor=mesh(new THREE.BoxGeometry(0.16,0.62,0.14),metal,false);
+        shinArmor.position.set(side*0.04,-0.36,0.02); knee.add(shinArmor);
+        const foot=mesh(new THREE.ConeGeometry(0.11,0.26,5),dark,false);
+        foot.position.y=-1.18; foot.rotation.x=Math.PI; knee.add(foot);
+        const jointGlow=mesh(new THREE.SphereGeometry(0.055,6,5),runeMat,false);
+        jointGlow.position.set(side*0.92,-0.04,0); hip.add(jointGlow);
+        legs.push({hip,knee,upper,lower,foot,side,baseZ:legZ[i],phase:(i + (side>0?0.5:0))*Math.PI});
+      }
+    }
+  } else {
+    // 半埋的破损守护者
+    for(let i=0;i<3;i++){
+      const a=(i/3)*Math.PI*2;
+      const plate=mesh(new THREE.DodecahedronGeometry(0.35,0),mossMat,false);
+      plate.position.set(Math.cos(a)*0.9,0.55,Math.sin(a)*0.9); bodyGroup.add(plate);
+    }
+    const crack=mesh(new THREE.BoxGeometry(0.04,0.6,0.03),runeMat,false);
+    crack.position.set(0.2,1.4,0.96); crack.rotation.z=0.4; bodyGroup.add(crack);
+    headGroup.position.y=1.45;
+    bodyGroup.position.y=-0.55; bodyGroup.rotation.z=0.10;
+  }
+  // 苔藓
+  if(variant==='decayed'){
+    for(let i=0;i<5;i++){
+      const m=mesh(new THREE.SphereGeometry(rand(0.15,0.3),6,5),mossMat,false);
+      m.position.set(rand(-0.8,0.8),rand(0.4,1.2),rand(-0.8,0.8)); bodyGroup.add(m);
+    }
+  }
+
+  // 瞄准线 / 落点环
+  const sight=makeGuardianSight();
+  const parts={
+    body:bodyGroup, core, headGroup, eye, eyeMat, eyeLight, petals, legs,
+    beamOrigin, sight, variant, eyeGlow:1, legsPhase:0,
+  };
+  return {group:g, parts};
+}
+
+function spawnGuardian(x,z,variant='stalker'){
+  const model=buildGuardianModel(variant);
+  const h=terrainHeight(x,z);
+  model.group.position.set(x,h,z);
+  const decayed=variant==='decayed';
+  model.group.scale.setScalar(decayed?1.05:1.38);
+  scene.add(model.group);
+  const hp=decayed?620:1200;
+  const g={
+    type:'guardian', variant, hp, maxHp:hp, group:model.group, parts:model.parts, baseScale:decayed?1.05:1.38,
+    displayName:decayed?'腐朽的守护者':(variant==='skyrunner'?'飞行守护者':'守护者'),
+    pos:new THREE.Vector3(x,h,z), vel:new THREE.Vector3(),
+    state:'idle', stateT:0, attackCD:1.5, staggerT:0, stunT:0, animT:0, walkPhase:rand(0,6),
+    radius:decayed?1.7:2.1, speed:decayed?0:1.65, damage:decayed?8:10, aggroRange:48,
+    frozen:0, burning:0, shocked:0, weakPoint:'eye', alertLevel:3, stealthAware:true,
+    laserState:'idle', laserT:0, laserCD:rand(2.5,4.5), parryCount:0, sightT:0,
+    deathT:0, rage:false, hpElY:4.8,
+  };
+  monsters.push(g);
+  registerCompendium(g.displayName,{type:'怪物',hp,desc:decayed?'被灾厄侵蚀、半埋在地下的守护者。眼睛仍然是弱点。':'古代希卡技术制造的自动兵器。会锁定目标发射古代激光；盾反 3 次可击破。'});
+  return g;
+}
+
+function spawnDecayedGuardian(x,z){ return spawnGuardian(x,z,'decayed'); }
+
+function spawnFlyingGuardian(x,z,y){
+  const g=new THREE.Group();
+  const metal=toon(0x9a9aa2,{shadowColor:0x3a3a42,steps:4,rimColor:0xddeeff,rimPower:2.2});
+  const dark=toon(0x34343a,{shadowColor:0x101014,steps:3,rimColor:0x8899aa});
+  const accent=toon(0xc8b060,{shadowColor:0x5a4a1a,steps:4,rimColor:0xffffaa});
+  const eyeMat=new THREE.MeshStandardMaterial({color:0xff3a10,emissive:0xcc2200,emissiveIntensity:2.2,roughness:0.2});
+  const runeMat=new THREE.MeshBasicMaterial({color:0x66ccff,transparent:true,opacity:0.8,blending:THREE.AdditiveBlending,depthWrite:false});
+  const mesh=(geo,mat,cast=true)=>{const m=new THREE.Mesh(geo,mat);m.castShadow=cast;return m;};
+  const body=new THREE.Group(); g.add(body);
+  const shell=mesh(new THREE.SphereGeometry(0.92,14,10),metal); shell.scale.set(1,0.82,0.95); body.add(shell);
+  const ring=mesh(new THREE.TorusGeometry(0.95,0.05,5,20),accent,false); ring.rotation.x=Math.PI/2; body.add(ring);
+  const bottom=mesh(new THREE.CylinderGeometry(0.55,0.75,0.35,10),dark); bottom.position.y=-0.55; body.add(bottom);
+  const eyeHousing=mesh(new THREE.CylinderGeometry(0.28,0.34,0.20,10),dark);
+  eyeHousing.rotation.x=Math.PI/2; eyeHousing.position.set(0,0.02,0.88); body.add(eyeHousing);
+  const eye=mesh(new THREE.SphereGeometry(0.16,12,9),eyeMat,false); eye.position.set(0,0.02,0.96); eye.scale.z=0.5; body.add(eye);
+  const pupil=mesh(new THREE.SphereGeometry(0.06,8,6),new THREE.MeshStandardMaterial({color:0x220806,emissive:0x661100,emissiveIntensity:0.8}),false);
+  pupil.position.set(0,0.02,1.03); body.add(pupil);
+  const eyeLight=new THREE.PointLight(0xff3300,2.0,12); eyeLight.position.set(0,0.02,1.1); body.add(eyeLight);
+  const propGroup=new THREE.Group(); body.add(propGroup);
+  const propellers=[];
+  for(let i=0;i<4;i++){
+    const a=(i/4)*Math.PI*2+Math.PI/4;
+    const arm=mesh(new THREE.CylinderGeometry(0.07,0.09,1.1,6),dark,false);
+    arm.rotation.z=Math.PI/2; arm.position.set(Math.cos(a)*0.85,0.10,Math.sin(a)*0.85); arm.rotation.y=-a; propGroup.add(arm);
+    const prop=new THREE.Group();
+    prop.position.set(Math.cos(a)*1.35,0.10,Math.sin(a)*1.35); propGroup.add(prop);
+    for(let j=0;j<2;j++){
+      const blade=mesh(new THREE.BoxGeometry(0.82,0.018,0.13),metal,false);
+      blade.position.x=0.36; blade.rotation.y=j*Math.PI; prop.add(blade);
+    }
+    const hub=mesh(new THREE.SphereGeometry(0.09,6,5),accent,false); prop.add(hub);
+    propellers.push(prop);
+  }
+  for(let i=0;i<4;i++){
+    const a=(i/4)*Math.PI*2;
+    const jet=mesh(new THREE.ConeGeometry(0.09,0.26,5),runeMat,false);
+    jet.position.set(Math.cos(a)*0.45,-0.62,Math.sin(a)*0.45); jet.rotation.x=Math.PI; body.add(jet);
+  }
+  const beamOrigin=new THREE.Object3D(); beamOrigin.position.set(0,0.02,1.08); body.add(beamOrigin);
+  const sight=makeGuardianSight();
+  const h=terrainHeight(x,z);
+  g.position.set(x,h+y,z); g.scale.setScalar(1.32); scene.add(g);
+  const parts={body,shell,eye,eyeMat,eyeLight,propGroup,propellers,beamOrigin,sight,legs:[]};
+  const gg={
+    type:'flyingGuardian', variant:'skyrunner', hp:720, maxHp:720, group:g, parts, baseScale:1.32,
+    displayName:'飞行守护者', pos:new THREE.Vector3(x,h+y,z), vel:new THREE.Vector3(),
+    state:'idle', staggerT:0, stunT:0, animT:0, attackCD:2, radius:1.8,
+    speed:3.0, damage:12, aggroRange:55, frozen:0, burning:0, shocked:0, weakPoint:'eye',
+    alertLevel:3, stealthAware:true, parryCount:0, baseY:h+y, hoverPhase:rand(0,Math.PI*2),
+    laserState:'idle', laserT:0, laserCD:rand(2,4), sightT:0, deathT:0, hpElY:2.8,
+  };
+  monsters.push(gg);
+  registerCompendium('飞行守护者',{type:'怪物',hp:720,desc:'空中巡逻的古代自动兵器。螺旋桨是其标志，眼睛是弱点。'});
+  return gg;
+}
+
+function getGuardianEyePos(m,out){
+  const v=out||new THREE.Vector3();
+  if(m.parts&&m.parts.beamOrigin){ m.parts.beamOrigin.getWorldPosition(v); return v; }
+  v.copy(m.pos); v.y+=2.2; return v;
+}
+
+function traceBeam(origin,target){
+  const dir=target.clone().sub(origin);
+  const dist=dir.length();
+  if(dist<0.001) return {end:target.clone(),blocked:false,dist:0};
+  dir.normalize();
+  const steps=Math.max(3,Math.ceil(dist/1.4));
+  const p=new THREE.Vector3();
+  for(let i=1;i<=steps;i++){
+    p.copy(origin).addScaledVector(dir,dist*i/steps);
+    if(p.y<terrainHeight(p.x,p.z)+0.20){
+      return {end:p.clone(),blocked:true,dist:origin.distanceTo(p)};
+    }
+    for(const c of collidables){
+      if(!c.radius||c.type==='signpost'||c.type==='chest') continue;
+      if(p.y<c.pos.y-0.2||p.y>c.pos.y+c.height) continue;
+      if(Math.hypot(p.x-c.pos.x,p.z-c.pos.z)<c.radius*0.92){
+        return {end:p.clone(),blocked:true,dist:origin.distanceTo(p)};
+      }
+    }
+  }
+  return {end:target.clone(),blocked:false,dist};
+}
+
+function setGuardianSight(m,eyePos,target,visible){
+  const s=m.parts.sight; if(!s) return;
+  s.line.visible=visible; s.ring.visible=visible;
+  if(!visible) return;
+  const trace=traceBeam(eyePos,target);
+  s.linePos.setXYZ(0,eyePos.x,eyePos.y,eyePos.z);
+  s.linePos.setXYZ(1,trace.end.x,trace.end.y,trace.end.z);
+  s.linePos.needsUpdate=true;
+  const gy=terrainHeight(player.pos.x,player.pos.z);
+  s.ring.position.set(player.pos.x,gy+0.06,player.pos.z);
+  s.ring.scale.setScalar(1+Math.sin(performance.now()*0.02)*0.08);
+}
+
+function guardianFireBeam(m,eyePos,damage){
+  const target=player.pos.clone().add(new THREE.Vector3(0,1.45,0));
+  const trace=traceBeam(eyePos,target);
+  spawnLaserBeam(eyePos,trace.end,0xff3300,0.10,0.20);
+  spawnLaserBeam(eyePos,trace.end,0xffaa66,0.035,0.26);
+  emitParticles(sparkSys,trace.end.x,trace.end.y,trace.end.z,trace.blocked?25:12,5,0.5,new THREE.Color(0xffaa66));
+  SFX.laser();
+  if(m.parts&&m.parts.eyeMat) m.parts.eyeMat.emissiveIntensity=2.0;
+  if(m.parts&&m.parts.eyeLight) m.parts.eyeLight.intensity=2.2;
+  if(!trace.blocked && player.state!=='dead' && !teleporting){
+    const toG=m.pos.clone().sub(player.pos); toG.y=0;
+    const pf=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
+    const facing=toG.lengthSq()>0.01?pf.dot(toG.normalize())>0.15:true;
+    const ancient=(currentShield&&currentShield.id==='ancient_shield');
+    if(player.shieldUp&&currentShield&&(facing||ancient)&&player.stamina>0.03){
+      m.parryCount=(m.parryCount||0)+1;
+      m.stunT=1.35;
+      player.stamina=Math.max(0,player.stamina-(ancient?0.02:0.14));
+      emitParticles(sparkSys,player.pos.x,player.pos.y+1.5,player.pos.z,60,10,0.7,new THREE.Color(0x88ddff));
+      SFX.shieldBlock(); SFX.hit();
+      toast(ancient?'古代盾 · 自动盾反！':'盾反成功！');
+      damageMonster(m,ancient?240:180,m.pos,true);
+      if(m.parryCount>=3){ damageMonster(m,99999,m.pos); toast('守护者被盾反击破！'); }
+      return;
+    }
+    const dmg=Math.round(damage*(m.hp<m.maxHp*0.35?1.25:1));
+    damagePlayer(dmg);
+    const away=player.pos.clone().sub(m.pos); away.y=0; away.normalize();
+    player.impulse.add(away.multiplyScalar(7)); player.impulse.y=3;
+    if(player.riding) toast('马匹受惊了！');
+  }
+}
+
+function startGuardianCharge(m){
+  m.laserState='charge'; m.laserT=0;
+  m.sightT=0;
+}
+function guardianChargeTick(m,dt,eyePos,target,chargeDur){
+  m.laserT+=dt;
+  const k=clamp(m.laserT/chargeDur,0,1);
+  const petalOpen=Math.sin(k*Math.PI*0.5)*0.55;
+  if(m.parts.petals){
+    m.parts.petals.forEach((p,i)=>{
+      p.rotation.z=(i/3)*Math.PI*2 + petalOpen*(i%2?1:-1);
+    });
+  }
+  m.parts.eyeGlow=1+k*3.0;
+  if(m.parts.eyeMat) m.parts.eyeMat.emissiveIntensity=1.6+k*4.5;
+  if(m.parts.eyeLight) m.parts.eyeLight.intensity=2+k*5;
+  m.sightT-=dt;
+  if(m.sightT<=0){ m.sightT=0.06; setGuardianSight(m,eyePos,target,true); }
+  if(m.laserT>=chargeDur){
+    setGuardianSight(m,eyePos,target,false);
+    m.laserState='cool'; m.laserT=0;
+    m.laserCD=m.hp<m.maxHp*0.35?rand(1.8,2.8):rand(3.0,4.6);
+    guardianFireBeam(m,eyePos,m.damage);
+  }
+}
+
+function updateGuardianAI(m,dt,dist,toPlayer,effectiveAggro){
+  const P=m.parts; if(!P) return;
+  m.stunT=Math.max(0,(m.stunT||0)-dt);
+  m.animT+=dt;
+  const eyePos=getGuardianEyePos(m);
+  const target=player.pos.clone().add(new THREE.Vector3(0,1.45,0));
+
+  if(m.type==='flyingGuardian'){
+    // 螺旋桨
+    if(P.propellers) P.propellers.forEach((p,i)=>{ p.rotation.y+=dt*(22+i*2); });
+    if(P.propGroup) P.propGroup.rotation.y+=dt*0.6;
+    P.body.rotation.x=Math.sin(m.animT*1.7)*0.06;
+    P.body.position.y=Math.sin(m.animT*2.1+m.hoverPhase)*0.18;
+
+    if(m.stunT>0){
+      m.group.rotation.z=Math.sin(m.animT*30)*0.12;
+      P.eyeMat.emissiveIntensity=0.6+Math.random()*1.2;
+      P.eyeLight.intensity=1+Math.random();
+      if(m.stunT<=0){ m.group.rotation.z=0; }
+      return;
+    }
+    m.group.rotation.z=lerp(m.group.rotation.z,0,1-Math.exp(-4*dt));
+    const active=dist<Math.max(effectiveAggro,55)&&player.state!=='dead'&&!teleporting;
+    if(active){
+      m.state='combat';
+      if(!guardianTipShown){ guardianTipShown=true; toast('飞行守护者锁定！右键举盾可盾反激光'); }
+      m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+      const want=16;
+      const ang=Math.atan2(m.pos.x-player.pos.x,m.pos.z-player.pos.z)+dt*0.35;
+      const tx=player.pos.x+Math.sin(ang)*want;
+      const tz=player.pos.z+Math.cos(ang)*want;
+      m.pos.x=lerp(m.pos.x,tx,1-Math.exp(-0.9*dt));
+      m.pos.z=lerp(m.pos.z,tz,1-Math.exp(-0.9*dt));
+      const hoverY=Math.max(terrainHeight(m.pos.x,m.pos.z)+9,player.pos.y+8.5+Math.sin(m.animT*1.5+m.hoverPhase)*0.8);
+      m.pos.y=lerp(m.pos.y,hoverY,1-Math.exp(-2.0*dt));
+      if(m.laserState==='idle'&&m.laserCD<=0&&dist<48) startGuardianCharge(m);
+      if(m.laserState==='charge') guardianChargeTick(m,dt,eyePos,target,m.hp<m.maxHp*0.35?0.85:1.35);
+      else {
+        m.laserCD-=dt;
+        if(m.laserState==='cool'){ m.laserT+=dt; if(m.laserT>0.35){ m.laserState='idle'; m.laserT=0; } }
+      }
+    } else {
+      m.state='idle';
+      m.pos.y=lerp(m.pos.y,m.baseY+Math.sin(m.animT*1.2+m.hoverPhase)*1.2,1-Math.exp(-1.5*dt));
+      m.pos.x+=Math.sin(m.animT*0.3+m.hoverPhase)*dt*1.2;
+      m.pos.z+=Math.cos(m.animT*0.27+m.hoverPhase)*dt*1.2;
+      m.group.rotation.y+=dt*0.1;
+      setGuardianSight(m,eyePos,target,false);
+      P.eyeMat.emissiveIntensity=1+Math.sin(performance.now()*0.002)*0.4;
+      P.eyeLight.intensity=1.5;
+    }
+    m.group.position.copy(m.pos);
+    m.group.rotation.x=lerp(m.group.rotation.x,clamp((player.pos.y+1.4-m.pos.y)*0.02,-0.25,0.25),1-Math.exp(-2*dt));
+    return;
+  }
+
+  // 地面守护者
+  if(m.stunT>0){
+    m.group.rotation.z=Math.sin(m.animT*28)*0.10;
+    if(m.parts.eyeMat) m.parts.eyeMat.emissiveIntensity=0.4+Math.random()*1.4;
+    if(m.parts.eyeLight) m.parts.eyeLight.intensity=0.8+Math.random()*1.2;
+    if(m.parts.legs) m.parts.legs.forEach((l,i)=>{ l.knee.rotation.x=Math.max(0,Math.sin(m.animT*22+i))*0.16; });
+    if(m.stunT<=0){ m.group.rotation.z=0; }
+    setGuardianSight(m,eyePos,target,false);
+    return;
+  }
+  m.group.rotation.z=lerp(m.group.rotation.z,0,1-Math.exp(-5*dt));
+  const active=dist<Math.max(effectiveAggro,50)&&player.state!=='dead'&&!teleporting;
+  if(active){
+    m.state='combat';
+    if(!guardianTipShown){ guardianTipShown=true; toast('守护者锁定！右键举盾，在激光命中瞬间盾反 3 次可击破'); }
+    m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+    // 头部追踪（局部角度限制）
+    if(P.headGroup){
+      const localYaw=Math.atan2(toPlayer.x,toPlayer.z)-m.group.rotation.y;
+      P.headGroup.rotation.y=lerp(P.headGroup.rotation.y,clamp(localYaw,-0.65,0.65),1-Math.exp(-5*dt));
+      P.headGroup.rotation.x=lerp(P.headGroup.rotation.x,clamp(-Math.atan2(player.pos.y+1.3-(m.pos.y+2.1),Math.max(1,dist))*0.6,-0.35,0.25),1-Math.exp(-5*dt));
+    }
+    // 走位
+    let mv=0, strafe=0;
+    if(m.variant!=='decayed'){
+      if(dist>24) mv=1; else if(dist<12) mv=-0.7; else strafe=Math.sin(m.animT*0.6)*0.5;
+      m.walkPhase+=dt*(2.2+Math.abs(mv)*2.4);
+      if(mv!==0||strafe!==0){
+        const fwd=new THREE.Vector3(Math.sin(m.group.rotation.y),0,Math.cos(m.group.rotation.y));
+        const right=new THREE.Vector3(fwd.z,0,-fwd.x);
+        m.pos.x+=(fwd.x*mv+right.x*strafe)*m.speed*dt;
+        m.pos.z+=(fwd.z*mv+right.z*strafe)*m.speed*dt;
+        resolveHorseCollisions({pos:m.pos,speed:0});
+      }
+      if(dist<4.6){
+        m.attackCD-=dt;
+        if(m.attackCD<=0){ m.attackCD=1.5; damagePlayer(m.variant==='decayed'?8:10); player.impulse.add(new THREE.Vector3(Math.sin(m.group.rotation.y),0,Math.cos(m.group.rotation.y)).multiplyScalar(6)); }
+      }
+    }
+    // 激光
+    if(m.laserState==='charge'){
+      guardianChargeTick(m,dt,eyePos,target,m.hp<m.maxHp*0.35?0.85:1.45);
+    } else {
+      m.laserCD-=dt;
+      if(m.laserState!=='charge'&&m.laserCD<=0&&dist<46&&dist>3) startGuardianCharge(m);
+      if(m.laserState==='cool'){ m.laserT+=dt; if(m.laserT>0.35){ m.laserState='idle'; m.laserT=0; } }
+      if(m.laserState!=='charge') setGuardianSight(m,eyePos,target,false);
+    }
+  } else {
+    m.state='idle';
+    setGuardianSight(m,eyePos,target,false);
+    if(P.eyeMat) P.eyeMat.emissiveIntensity=0.8+Math.sin(performance.now()*0.002)*0.3;
+    if(P.eyeLight) P.eyeLight.intensity=1.0;
+    if(m.variant!=='decayed'&&P.legs){ P.legs.forEach(l=>{ l.knee.rotation.x=lerp(l.knee.rotation.x,0,1-Math.exp(-4*dt)); }); }
+  }
+  // 地面高度 / 腿部动画
+  const gy=terrainHeight(m.pos.x,m.pos.z);
+  m.pos.y=gy;
+  m.group.position.set(m.pos.x,gy,m.pos.z);
+  const moving=(m.state==='combat'&&m.variant!=='decayed'&&dist>12);
+  const amp=moving?0.22:0.03;
+  if(P.legs){
+    P.legs.forEach((l,i)=>{
+      const ph=m.walkPhase+i*1.1;
+      l.hip.rotation.y=Math.sin(ph)*amp;
+      l.knee.rotation.z=Math.sin(ph+(i%2?Math.PI:0))*amp*0.8;
+      if(m.stunT>0) l.knee.rotation.x=Math.max(0,Math.sin(m.animT*24+i))*0.18;
+      else l.knee.rotation.x=lerp(l.knee.rotation.x,0,1-Math.exp(-6*dt));
+    });
+  }
+  if(P.core) P.core.rotation.y+=dt*0.18;
+  if(P.body) P.body.position.y=(m.variant==='decayed'?-0.55:0)+Math.sin(m.animT*2.2)*0.035+(moving?Math.sin(m.walkPhase*2)*0.03:0);
+  if(m.laserState!=='charge'){
+    if(P.petals) P.petals.forEach((p,i)=>{ p.rotation.z=lerp(p.rotation.z,(i/3)*Math.PI*2,1-Math.exp(-4*dt)); });
+  }
+}
+
+function onGuardianDeath(m){
+  if(m.guardianDeathDone) return;
+  m.guardianDeathDone=true;
+  if(m.parts.sight){
+    m.parts.sight.line.visible=false; m.parts.sight.ring.visible=false;
+    scene.remove(m.parts.sight.line); scene.remove(m.parts.sight.ring);
+    m.parts.sight.line.geometry.dispose(); m.parts.sight.lineMat.dispose();
+    m.parts.sight.ring.geometry.dispose(); m.parts.sight.ringMat.dispose();
+  }
+  const p=m.pos.clone(); p.y+=m.type==='flyingGuardian'?1.0:1.8;
+  emitParticles(fireSys,p.x,p.y,p.z,120,10,1.2,new THREE.Color(0xff6622));
+  emitParticles(sparkSys,p.x,p.y,p.z,100,14,1.0,new THREE.Color(0x66ccff));
+  spawnLaserBeam(p,p.clone().add(new THREE.Vector3(0,8,0)),0x66ccff,0.15,0.5);
+  SFX.bomb();
+  const gear=inventory.materials.find(x=>x.id==='guardian_gear');
+  if(gear) gear.qty=(gear.qty||0)+(m.variant==='decayed'?1:2);
+  toast('守护者停止运转 · 获得古代齿轮 ×'+(m.variant==='decayed'?1:2));
+}
+
+function updateGuardianDeath(m,dt){
+  if(m.type==='flyingGuardian'){
+    m.vy=(m.vy||0)-GRAVITY*0.55*dt;
+    m.pos.y+=m.vy*dt;
+    m.group.rotation.z+=dt*2.2; m.group.rotation.x+=dt*1.3;
+    const gy=terrainHeight(m.pos.x,m.pos.z)+0.3;
+    if(m.pos.y<gy&&!m.crashed){
+      m.crashed=true; m.pos.y=gy;
+      emitParticles(fireSys,m.pos.x,m.pos.y+1,m.pos.z,160,14,1.4,new THREE.Color(0xff6622));
+      emitParticles(sparkSys,m.pos.x,m.pos.y+1,m.pos.z,120,16,1.0,new THREE.Color(0x88ddff));
+      spawnLaserBeam(m.pos.clone(),m.pos.clone().add(new THREE.Vector3(0,12,0)),0x88ddff,0.2,0.6);
+      SFX.thunder();
+    }
+    m.group.position.copy(m.pos);
+  } else {
+    m.group.rotation.z=lerp(m.group.rotation.z,Math.PI/2,dt*1.6);
+    m.group.position.y=Math.max(terrainHeight(m.pos.x,m.pos.z)-0.8,m.group.position.y-dt*0.45);
+  }
+}
+
+function spawnStoneTalus(x,z){
+  const g=new THREE.Group();
+  const rockMat=toon(0x6b5a48,{shadowColor:0x2a2018,steps:3,rimColor:0xaa9988});
+  g.add(new THREE.Mesh(new THREE.DodecahedronGeometry(2.2,0),rockMat)).position.y=3.2;
+  g.add(new THREE.Mesh(new THREE.DodecahedronGeometry(0.95,0),rockMat)).position.y=4.9;
+  for(const s of [-1,1]){
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.12,5,4),
+      new THREE.MeshStandardMaterial({color:0xffaa00,emissive:0xcc6600,emissiveIntensity:1.5}));
+    eye.position.set(s*0.33,5.05,0.75); g.add(eye);
+    const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.7,2.4,6),rockMat);
+    arm.position.set(s*2.4,2.9,0); arm.rotation.z=s*0.4; g.add(arm);
+  }
+  const h=terrainHeight(x,z); g.position.set(x,h,z); scene.add(g);
+  monsters.push({
+    type:'stoneTalus',hp:260,maxHp:260,group:g,displayName:'岩石巨人',
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),
+    state:'idle',staggerT:0,animT:0,attackCD:2,radius:2.0,speed:1.5,damage:20,aggroRange:25,
+    frozen:0,burning:0,shocked:0,weakPoint:'back',alertLevel:3,stealthAware:false,
+  });
+  registerCompendium('岩石巨人',{type:'怪物',hp:260,desc:'伪装成岩石的巨大魔物。弱点在背部矿石。'});
+}
+function spawnLynel(x,z){
+  const g=new THREE.Group();
+  const bodyMat=toon(0x5a3a2a,{shadowColor:0x2a1a10,steps:4,rimColor:0xffaa88});
+  const maneMat=toon(0xcc4422,{shadowColor:0x6a1a08,steps:3,rimColor:0xff8844,emissive:0x441100,emissiveIntensity:0.3});
+  const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.8,1.6,4,6),bodyMat);
+  body.rotation.z=Math.PI/2; body.position.y=2.1; g.add(body);
+  const head=new THREE.Mesh(new THREE.ConeGeometry(0.47,1.2,6),bodyMat);
+  head.position.set(0,3.0,0.9); head.rotation.x=0.6; g.add(head);
+  const mane=new THREE.Mesh(new THREE.ConeGeometry(0.53,0.9,6),maneMat);
+  mane.position.set(0,3.1,0.5); mane.rotation.x=0.5; g.add(mane);
+  for(let i=0;i<4;i++){
+    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.16,1.2,5),bodyMat);
+    leg.position.set((i<2?-0.55:0.55),0.6,(i%2===0?0.8:-0.8)); g.add(leg);
+  }
+  const h=terrainHeight(x,z); g.position.set(x,h,z); scene.add(g);
+  monsters.push({
+    type:'lynel',hp:1600,maxHp:1600,group:g,displayName:'莱尼尔',
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),
+    state:'idle',staggerT:0,animT:0,attackCD:1.8,radius:1.3,speed:3.0,damage:30,aggroRange:35,
+    frozen:0,burning:0,shocked:0,weakPoint:'head',alertLevel:3,stealthAware:true,
+  });
+  registerCompendium('莱尼尔',{type:'怪物',hp:1600,desc:'半人马型强大魔物。弱点在头部。'});
+}
+const MOBLIN_NAMES=['红色莫力布林','蓝色莫力布林','黑色莫力布林','白银莫力布林'];
+function spawnMoblin(x,z,level=1){
+  const g=new THREE.Group();
+  const cols=[0x9a3a2a,0x3a5a9a,0x2a2a2a,0xd0d0d0];
+  const skin=toon(cols[Math.min(level-1,3)],{shadowColor:0x3a1010,steps:3,rimColor:0xffaaaa});
+  const hornMat=toon(0xe0d8b0,{shadowColor:0x7a6a40,steps:3,rimColor:0xffffdd});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(0.95,8,7),skin);
+  body.scale.set(1,1.05,0.85); body.position.y=1.9; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.66,8,7),skin);
+  head.position.y=2.95; head.castShadow=true; g.add(head);
+  const snout=new THREE.Mesh(new THREE.CylinderGeometry(0.26,0.32,0.38,6),skin);
+  snout.rotation.x=Math.PI/2; snout.position.set(0,2.82,0.62); g.add(snout);
+  for(const s of [-1,1]){
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.11,5,4),
+      new THREE.MeshStandardMaterial({color:0xffdd44,emissive:0xaa6600,emissiveIntensity:0.7}));
+    eye.position.set(s*0.28,3.10,0.52); g.add(eye);
+    const horn=new THREE.Mesh(new THREE.ConeGeometry(0.11,0.55,5),hornMat);
+    horn.position.set(s*0.40,3.50,0.06); horn.rotation.z=s*0.45; g.add(horn);
+  }
+  const armL=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.14,0.95,6),skin);
+  armL.position.set(-0.95,1.95,0); armL.rotation.z=0.3; armL.castShadow=true; g.add(armL);
+  const armR=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.14,0.95,6),skin);
+  armR.position.set(0.95,1.95,0); armR.rotation.z=-0.3; armR.castShadow=true; g.add(armR);
+  const legL=new THREE.Mesh(new THREE.CylinderGeometry(0.19,0.17,0.85,6),skin);
+  legL.position.set(-0.38,0.85,0); legL.castShadow=true; g.add(legL);
+  const legR=new THREE.Mesh(new THREE.CylinderGeometry(0.19,0.17,0.85,6),skin);
+  legR.position.set(0.38,0.85,0); legR.castShadow=true; g.add(legR);
+  const h=terrainHeight(x,z); g.position.set(x,h,z); scene.add(g);
+  const hp=[120,260,500,900][Math.min(level-1,3)];
+  const name=MOBLIN_NAMES[Math.min(level-1,3)];
+  monsters.push({
+    type:'moblin',level,hp,maxHp:hp,group:g,parts:{armL,armR,legL,legR,body,head},displayName:name,
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),
+    state:'patrol',stateT:0,patrolAngle:rand(0,Math.PI*2),
+    patrolCenter:new THREE.Vector3(x,h,z),attackCD:0,staggerT:0,animT:0,
+    radius:1.0,speed:1.9+level*0.25,
+    damage:[0,18,30,45][Math.min(level,3)],aggroRange:18,
+    frozen:0,burning:0,shocked:0,alertLevel:0,stealthAware:true,
+  });
+  registerCompendium(name,{type:'怪物',hp,desc:'体型巨大的波克布林，一击沉重。'});
+}
+const CHU_NAMES=['绿色丘丘','蓝色丘丘','黑色丘丘','白银丘丘'];
+function spawnChuchu(x,z,level=1){
+  const g=new THREE.Group();
+  const cols=[0x66aa44,0x4488cc,0x333333,0xcccccc];
+  const col=cols[Math.min(level-1,3)];
+  const bodyMat=toon(col,{shadowColor:new THREE.Color(col).multiplyScalar(0.4).getHex(),steps:3,rimColor:0x88ffaa});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(0.55,8,7),bodyMat);
+  body.scale.y=0.85; body.position.y=0.55; body.castShadow=true; g.add(body);
+  for(const s of [-1,1]){
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.07,5,4),new THREE.MeshStandardMaterial({color:0x111111}));
+    eye.position.set(s*0.17,0.68,0.44); g.add(eye);
+  }
+  const h=terrainHeight(x,z); g.position.set(x,h,z); scene.add(g);
+  const hp=[8,24,60,120][Math.min(level-1,3)];
+  const name=CHU_NAMES[Math.min(level-1,3)];
+  monsters.push({
+    type:'chuchu',level,hp,maxHp:hp,group:g,parts:{body},displayName:name,
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),
+    state:'patrol',stateT:0,patrolAngle:rand(0,Math.PI*2),
+    patrolCenter:new THREE.Vector3(x,h,z),attackCD:0,staggerT:0,animT:0,
+    radius:0.6,speed:1.8,damage:[0,4,8,14][Math.min(level,3)],aggroRange:10,
+    frozen:0,burning:0,shocked:0,alertLevel:0,stealthAware:false,hopCD:rand(0,0.8),
+  });
+  registerCompendium(name,{type:'怪物',hp,desc:'凝胶状魔物，会弹跳着靠近。'});
+}
+
+// ============================================================
+// ★ 追加生态：西诺克斯 / 莫尔德拉吉克 / 依盖队 / 维兹罗布 / 蝙蝠
+// ============================================================
+function spawnHinox(x,z,level=1){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group();
+  const skinCols=[0xb44a3a,0x3a6ab4,0x333338];
+  const skin=toon(skinCols[Math.min(level-1,2)],{shadowColor:0x2a1410,steps:3,rimColor:0xffccaa});
+  const belly=toon(0xd8b888,{shadowColor:0x6a4a2a,steps:3});
+  const leather=toon(0x4a3020,{shadowColor:0x1a0e08,steps:3});
+  const gold=toon(0xc8a84c,{shadowColor:0x5a4018,steps:3,rimColor:0xffe9a0});
+  const eyeMat=new THREE.MeshStandardMaterial({color:0xffe066,emissive:0xffaa22,emissiveIntensity:1.6,roughness:0.18});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(1.7,16,12),skin);
+  body.position.y=2.4; body.scale.set(1.25,1.0,0.9); body.castShadow=true; g.add(body);
+  const gut=new THREE.Mesh(new THREE.SphereGeometry(1.25,14,10),belly);
+  gut.position.set(0,2.0,0.9); gut.scale.set(1.0,0.9,0.45); g.add(gut);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.95,14,11),skin);
+  head.position.y=4.1; head.scale.set(1.05,0.9,0.95); head.castShadow=true; g.add(head);
+  const jaw=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.45,1.2),skin);
+  jaw.position.set(0,3.6,0.45); g.add(jaw);
+  const eye=new THREE.Mesh(new THREE.SphereGeometry(0.38,12,9),eyeMat);
+  eye.position.set(0,4.25,0.9); eye.scale.z=0.55; eye.userData.noMerge=true; g.add(eye);
+  const pupil=new THREE.Mesh(new THREE.SphereGeometry(0.16,8,6),new THREE.MeshBasicMaterial({color:0x180a00}));
+  pupil.position.set(0,4.25,1.12); g.add(pupil);
+  const brow=new THREE.Mesh(new THREE.BoxGeometry(1.6,0.22,0.4),leather);
+  brow.position.set(0,4.65,0.72); brow.rotation.z=0.08; g.add(brow);
+  const arms=[];
+  for(const s of [-1,1]){
+    const shoulder=new THREE.Group(); shoulder.position.set(s*1.7,3.2,0); g.add(shoulder);
+    const upper=new THREE.Mesh(new THREE.CylinderGeometry(0.38,0.32,1.7,8),skin);
+    upper.position.y=-0.75; upper.rotation.z=s*0.2; shoulder.add(upper);
+    const forearm=new THREE.Mesh(new THREE.CylinderGeometry(0.34,0.42,1.7,8),skin);
+    forearm.position.y=-1.65; shoulder.add(forearm);
+    const hand=new THREE.Mesh(new THREE.SphereGeometry(0.46,8,6),skin);
+    hand.position.y=-2.55; shoulder.add(hand);
+    arms.push(shoulder);
+  }
+  const legs=[];
+  for(const s of [-1,1]){
+    const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.5,0.42,1.9,8),skin);
+    thigh.position.set(s*0.8,1.0,0); thigh.castShadow=true; g.add(thigh);
+    const foot=new THREE.Mesh(new THREE.BoxGeometry(0.9,0.45,1.3),leather);
+    foot.position.set(s*0.8,0.15,0.25); g.add(foot);
+    legs.push(thigh);
+  }
+  const necklace=new THREE.Mesh(new THREE.TorusGeometry(1.2,0.13,5,16),gold);
+  necklace.rotation.x=Math.PI/2; necklace.position.set(0,3.4,0.2); g.add(necklace);
+  for(let i=0;i<4;i++){
+    const weapon=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,1.2,5),i%2?gold:leather);
+    weapon.position.set(-0.9+i*0.6,3.2,0.7); weapon.rotation.z=0.7; g.add(weapon);
+  }
+  g.position.set(x,h,z); scene.add(g);
+  const hp=[700,1100,1500][Math.min(level-1,2)];
+  const name=['西诺克斯','蓝色西诺克斯','黑色西诺克斯'][Math.min(level-1,2)];
+  monsters.push({
+    type:'hinox',level,hp,maxHp:hp,group:g,parts:{body,head,eye,arms,legs},displayName:name,
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),state:'sleeping',stateT:0,
+    patrolCenter:new THREE.Vector3(x,h,z),attackCD:2.2,staggerT:0,animT:rand(0,4),
+    radius:2.4,speed:1.25,damage:24,aggroRange:24,frozen:0,burning:0,shocked:0,
+    alertLevel:0,stealthAware:true,weakPoint:'eye',throwCD:6,
+  });
+  registerCompendium(name,{type:'世界首领',hp,desc:'独眼巨人，沉睡时不要靠得太近。'});
+}
+function spawnMolduga(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group();
+  const skin=toon(0x8a6a44,{shadowColor:0x3a2410,steps:3,rimColor:0xffdd99});
+  const dark=toon(0x5a4228,{shadowColor:0x1e1408,steps:3});
+  const teeth=toon(0xe8ddb8,{shadowColor:0x8a7a5a,steps:3,rimColor:0xffffff});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(1.9,16,12),skin);
+  body.scale.set(0.9,0.65,2.6); body.position.y=1.0; body.castShadow=true; g.add(body);
+  const back=new THREE.Mesh(new THREE.SphereGeometry(1.4,14,10),dark);
+  back.scale.set(0.8,0.35,2.2); back.position.y=1.45; g.add(back);
+  const mouth=new THREE.Mesh(new THREE.SphereGeometry(1.0,12,8),new THREE.MeshStandardMaterial({color:0x3a1010,roughness:0.8}));
+  mouth.scale.set(0.8,0.5,0.8); mouth.position.set(0,0.9,2.3); g.add(mouth);
+  for(let i=0;i<8;i++){
+    const tooth=new THREE.Mesh(new THREE.ConeGeometry(0.09,0.38,4),teeth);
+    const a=i/8*Math.PI*2;
+    tooth.position.set(Math.cos(a)*0.7,0.9+Math.sin(a)*0.4,2.7); tooth.rotation.x=Math.PI/2; g.add(tooth);
+  }
+  const fin=new THREE.Mesh(new THREE.ConeGeometry(0.55,1.7,5),dark);
+  fin.position.set(0,2.2,-0.4); fin.rotation.x=-0.4; g.add(fin);
+  const tail=new THREE.Mesh(new THREE.ConeGeometry(0.6,2.0,5),skin);
+  tail.position.set(0,1.0,-4.0); tail.rotation.x=Math.PI/2; g.add(tail);
+  g.position.set(x,h-1.1,z); scene.add(g);
+  monsters.push({
+    type:'molduga',hp:650,maxHp:650,group:g,parts:{body,back,fin,tail},displayName:'莫尔德拉吉克',
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),state:'lurk',lurkT:rand(2,4),leapT:0,surfaceT:0,
+    patrolCenter:new THREE.Vector3(x,h,z),patrolAngle:rand(0,6.28),attackCD:2,staggerT:0,animT:0,
+    radius:2.4,speed:3.6,damage:22,aggroRange:32,frozen:0,burning:0,shocked:0,alertLevel:2,stealthAware:true,
+  });
+  registerCompendium('莫尔德拉吉克',{type:'世界首领',hp:650,desc:'在沙海下巡游的巨大沙鱼，会追逐地面的震动。'});
+}
+function spawnYiga(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group();
+  const suit=toon(0x6a1a24,{shadowColor:0x26080c,steps:3,rimColor:0xff7777});
+  const dark=toon(0x1a1418,{shadowColor:0x080608,steps:3});
+  const mask=toon(0xe0d8c0,{shadowColor:0x6a6250,steps:3,rimColor:0xffffff});
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.26,0.34,1.0,8),suit);
+  body.position.y=1.1; body.castShadow=true; g.add(body);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.23,9,7),mask);
+  head.position.y=1.8; head.scale.set(1.0,1.15,0.8); g.add(head);
+  const eyeL=new THREE.Mesh(new THREE.BoxGeometry(0.11,0.035,0.02),new THREE.MeshBasicMaterial({color:0x220000}));
+  eyeL.position.set(-0.09,1.83,0.19); eyeL.rotation.z=0.25; g.add(eyeL);
+  const eyeR=eyeL.clone(); eyeR.position.x=0.09; eyeR.rotation.z=-0.25; g.add(eyeR);
+  const scarf=new THREE.Mesh(new THREE.ConeGeometry(0.32,0.9,5),suit); scarf.position.set(0,1.48,-0.3); scarf.rotation.x=2.4; g.add(scarf);
+  for(const s of [-1,1]){
+    const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.075,0.07,0.7,5),suit);
+    arm.position.set(s*0.33,1.2,0.05); arm.rotation.z=s*0.3; g.add(arm);
+    const leg=new THREE.Mesh(new THREE.CylinderGeometry(0.095,0.08,0.55,5),dark);
+    leg.position.set(s*0.15,0.45,0); leg.castShadow=true; g.add(leg);
+  }
+  const sickle=new THREE.Mesh(new THREE.TorusGeometry(0.34,0.025,4,10,Math.PI*1.3),toon(0xc8c8d0,{shadowColor:0x5a5a68,steps:4,rimColor:0xffffff}));
+  sickle.position.set(0.5,1.0,0.15); sickle.rotation.z=0.6; g.add(sickle);
+  g.position.set(x,h,z); scene.add(g);
+  monsters.push({
+    type:'yiga',hp:150,maxHp:150,group:g,parts:{body,head,scarf},displayName:'依盖队剑士',
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),state:'patrol',patrolAngle:rand(0,6.28),
+    patrolCenter:new THREE.Vector3(x,h,z),attackCD:0,staggerT:0,animT:0,
+    radius:0.55,speed:4.2,damage:11,aggroRange:24,frozen:0,burning:0,shocked:0,alertLevel:1,stealthAware:true,
+    teleportCD:rand(1,3),
+  });
+  registerCompendium('依盖队剑士',{type:'人类敌人',hp:150,desc:'崇拜灾厄的忍者。会瞬移到背后。'});
+}
+function spawnWizzrobe(x,z,elem='fire'){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group();
+  const cols={fire:0xd84a2a,ice:0x3a7ac8,thunder:0xc8b42a};
+  const col=cols[elem]||0xd84a2a;
+  const robe=toon(col,{shadowColor:new THREE.Color(col).multiplyScalar(0.4).getHex(),steps:3,rimColor:0xffffff,emissive:col,emissiveIntensity:0.25});
+  const body=new THREE.Mesh(new THREE.ConeGeometry(0.6,1.6,9),robe);
+  body.position.y=1.0; body.castShadow=true; g.add(body);
+  const hood=new THREE.Mesh(new THREE.SphereGeometry(0.45,9,7,0,Math.PI*2,0,Math.PI*0.75),robe);
+  hood.position.y=1.85; g.add(hood);
+  const face=new THREE.Mesh(new THREE.SphereGeometry(0.24,9,7),new THREE.MeshBasicMaterial({color:0x100810}));
+  face.position.set(0,1.75,0.22); g.add(face);
+  for(const s of [-1,1]){
+    const eye=new THREE.Mesh(new THREE.SphereGeometry(0.045,5,4),new THREE.MeshBasicMaterial({color:0xffee66}));
+    eye.position.set(s*0.09,1.78,0.39); g.add(eye);
+  }
+  const orb=new THREE.Mesh(new THREE.SphereGeometry(0.18,8,6),new THREE.MeshStandardMaterial({color:col,emissive:col,emissiveIntensity:2.4}));
+  orb.position.set(0.55,2.1,0.15); g.add(orb);
+  const staff=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,1.6,5),toon(0x6a4a2a,{steps:3}));
+  staff.position.set(0.55,1.4,0.15); staff.rotation.z=-0.2; g.add(staff);
+  g.position.set(x,h+0.35,z); scene.add(g);
+  const nm={fire:'火之维兹罗布',ice:'冰之维兹罗布',thunder:'雷之维兹罗布'}[elem]||'维兹罗布';
+  monsters.push({
+    type:'wizzrobe',elem,hp:190,maxHp:190,group:g,parts:{body,hood,orb},displayName:nm,
+    pos:new THREE.Vector3(x,h+0.35,z),vel:new THREE.Vector3(),state:'float',attackCD:2,
+    patrolCenter:new THREE.Vector3(x,h,z),patrolAngle:rand(0,6.28),staggerT:0,animT:0,
+    radius:0.6,speed:2.2,damage:12,aggroRange:30,frozen:0,burning:0,shocked:0,alertLevel:1,stealthAware:true,
+    teleportCD:rand(2,4),floatT:0,baseY:h+0.35,
+  });
+  registerCompendium(nm,{type:'魔法敌人',hp:190,desc:'漂浮的法师，会瞬移并发射元素弹。'});
+}
+function spawnKohga(x,z){
+  const h=terrainHeight(x,z);
+  const g=new THREE.Group();
+  const suit=toon(0x7a1a2a,{shadowColor:0x28080e,steps:3,rimColor:0xff8888});
+  const dark=toon(0x1c151a,{shadowColor:0x080608,steps:3});
+  const mask=toon(0xe8dfc8,{shadowColor:0x6a6250,steps:3,rimColor:0xffffff});
+  const gold=toon(0xd0aa4a,{shadowColor:0x5a4018,steps:3,rimColor:0xffeaa0});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(1.4,14,11),suit);
+  body.position.y=2.4; body.scale.set(1.35,1.25,1.05); body.castShadow=true; g.add(body);
+  const belly=new THREE.Mesh(new THREE.SphereGeometry(1.05,12,9),mask);
+  belly.position.set(0,2.2,0.9); belly.scale.set(1,1,0.5); g.add(belly);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.72,11,9),mask);
+  head.position.y=4.0; head.scale.set(1.1,0.9,0.85); g.add(head);
+  for(const s of [-1,1]){
+    const slit=new THREE.Mesh(new THREE.BoxGeometry(0.34,0.07,0.04),new THREE.MeshBasicMaterial({color:0x1a0808}));
+    slit.position.set(s*0.22,4.05,0.62); slit.rotation.z=s*0.25; g.add(slit);
+    const arm=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.22,1.5,6),suit);
+    arm.position.set(s*1.45,2.4,0.1); arm.rotation.z=s*0.9; g.add(arm);
+    const hand=new THREE.Mesh(new THREE.SphereGeometry(0.24,6,5),mask);
+    hand.position.set(s*2.1,1.9,0.2); g.add(hand);
+    const foot=new THREE.Mesh(new THREE.BoxGeometry(0.55,0.4,0.9),dark);
+    foot.position.set(s*0.55,0.2,0.15); g.add(foot);
+  }
+  const topknot=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.3,1.2,6),dark);
+  topknot.position.set(0,4.85,-0.15); g.add(topknot);
+  const fan=new THREE.Mesh(new THREE.CircleGeometry(0.85,12,0,Math.PI),gold);
+  fan.position.set(2.1,2.9,0.25); fan.rotation.y=0.2; fan.material.side=THREE.DoubleSide; g.add(fan);
+  const aura=new THREE.Mesh(new THREE.TorusGeometry(2.0,0.06,5,30),
+    new THREE.MeshBasicMaterial({color:0xcc3355,transparent:true,opacity:0.4,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+  aura.rotation.x=Math.PI/2; aura.position.y=0.15; g.add(aura);
+  g.position.set(x,h,z); scene.add(g);
+  const boss={
+    type:'kohga',name:'可盖大人',displayName:'可盖大人',hp:900,maxHp:900,group:g,
+    parts:{body,head,fan},pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),
+    state:'idle',attackCD:2,teleportCD:3,staggerT:0,animT:0,radius:1.8,damage:16,
+    aggroRange:24,alertLevel:0,stealthAware:true,engaged:false,aura,
+    frozen:0,burning:0,shocked:0,
+  };
+  monsters.push(boss);
+  registerCompendium('可盖大人',{type:'BOSS',hp:900,desc:'依盖队的首领。铁球机关是他的拿手好戏，但常常砸到自己。'});
+  // guard post
+  spawnYiga(x+7,z+4); spawnYiga(x-6,z+5); spawnYiga(x,z-7);
+  return boss;
+}
+function spawnKeese(x,z){
+  const h=terrainHeight(x,z)+2.5;
+  const g=new THREE.Group();
+  const skin=toon(0x4a3a4a,{shadowColor:0x140e16,steps:2,rimColor:0xaa88aa});
+  const body=new THREE.Mesh(new THREE.SphereGeometry(0.18,7,6),skin); body.scale.set(1,0.7,1.3); g.add(body);
+  const wingGeo=new THREE.ConeGeometry(0.3,0.7,3);
+  const wl=new THREE.Mesh(wingGeo,skin); wl.position.set(-0.28,0,0); wl.rotation.z=Math.PI/2; wl.rotation.y=0.3; g.add(wl);
+  const wr=new THREE.Mesh(wingGeo,skin); wr.position.set(0.28,0,0); wr.rotation.z=-Math.PI/2; wr.rotation.y=-0.3; g.add(wr);
+  const eyeMat=new THREE.MeshBasicMaterial({color:0xff4422});
+  for(const s of [-1,1]){ const e=new THREE.Mesh(new THREE.SphereGeometry(0.035,4,3),eyeMat); e.position.set(s*0.08,0.02,0.16); g.add(e); }
+  g.position.set(x,h,z); scene.add(g);
+  monsters.push({
+    type:'keese',hp:16,maxHp:16,group:g,parts:{body,wingL:wl,wingR:wr},displayName:'蝙蝠',
+    pos:new THREE.Vector3(x,h,z),vel:new THREE.Vector3(),state:'circle',circleT:rand(0,6),
+    patrolCenter:new THREE.Vector3(x,h,z),patrolAngle:rand(0,6.28),
+    attackCD:1.5,staggerT:0,animT:0,radius:0.3,speed:4.5,damage:3,aggroRange:18,
+    frozen:0,burning:0,shocked:0,alertLevel:0,stealthAware:false,flyBase:h,
+  });
+  registerCompendium('蝙蝠',{type:'生物',hp:16,desc:'成群出没的夜行生物。'});
+}
+
+for(let i=0;i<14;i++){ const x=rand(-300,300),z=rand(50,400); if(!isWater(x,z)) spawnBokoblin(x,z,randInt(1,3)); }
+for(let i=0;i<8;i++) spawnBokoblin(rand(-HALF_X+100,HALF_X-100),rand(-HALF_Z+100,HALF_Z-100),randInt(1,4));
+for(let i=0;i<5;i++) spawnLizalfos(rand(-1000,-600),rand(-1000,-500),randInt(2,3),'ice');
+for(let i=0;i<5;i++) spawnLizalfos(rand(600,1000),rand(-900,-400),randInt(2,3),'fire');
+for(let i=0;i<4;i++) spawnLizalfos(rand(-1000,-500),rand(500,900),randInt(2,3),'thunder');
+for(let i=0;i<4;i++) spawnLizalfos(rand(400,900),rand(500,1000),randInt(2,3),null);
+for(let i=0;i<6;i++) spawnMoblin(rand(-HALF_X+150,HALF_X-150),rand(-HALF_Z+150,HALF_Z-150),randInt(1,3));
+for(let i=0;i<20;i++){ const x=rand(-HALF_X+100,HALF_X-100),z=rand(-HALF_Z+100,HALF_Z-100); if(!isWater(x,z)) spawnChuchu(x,z,randInt(1,3)); }
+// ★ 守护者：巡逻型 / 腐朽型 / 飞行型
+spawnGuardian(-400, -200, 'stalker');
+spawnGuardian(400, -300, 'stalker');
+spawnGuardian(800, -500, 'stalker');
+spawnGuardian(0, 100, 'stalker');
+spawnGuardian(-150, 500, 'stalker');
+spawnGuardian(600, 200, 'stalker');
+spawnDecayedGuardian(-300, 430);
+spawnDecayedGuardian(-620, -280);
+spawnDecayedGuardian(930, 760);
+spawnStoneTalus(-900,-600); spawnStoneTalus(900,-700);
+spawnLynel(-1100,-900); spawnLynel(1100,900);
+// world bosses and new roaming ecology
+spawnHinox(-520,180,1); spawnHinox(540,720,2); spawnHinox(-980,-330,3);
+spawnMolduga(-880,640); spawnMolduga(-620,810);
+spawnYiga(-290,585); spawnYiga(585,565); spawnYiga(40,175); spawnYiga(-40,-720);
+spawnKohga(-880,790);
+spawnWizzrobe(620,-330,'fire'); spawnWizzrobe(-770,-560,'ice'); spawnWizzrobe(-640,730,'thunder'); spawnWizzrobe(330,800,'fire');
+for(let i=0;i<9;i++){
+  const c=caves[i%Math.max(1,caves.length)];
+  spawnKeese(c.pos.x+rand(-3,3),c.pos.z+rand(-3,3));
+}
+spawnKeese(LANDMARKS.greatPlateau.x+45,LANDMARKS.greatPlateau.z-20);
+spawnKeese(LANDMARKS.greatPlateau.x-55,LANDMARKS.greatPlateau.z+40);
+spawnKeese(LANDMARKS.greatPlateau.x+10,LANDMARKS.greatPlateau.z+70);
+
+// Every cave is inhabited: this makes the six new interiors real dungeons,
+// not decorative rock props. Danger scales with the region.
+caves.forEach((c,i)=>{
+  const danger=Math.max(1,c.danger||1);
+  const count=1+danger;
+  const startIdx=monsters.length;
+  for(let n=0;n<count;n++){
+    const a=(n/count)*Math.PI*2+0.6;
+    const x=c.pos.x+Math.cos(a)*4.4, z=c.pos.z+Math.sin(a)*4.4;
+    if(danger>=3 && n===0) spawnLizalfos(x,z,3,'fire');
+    else if(danger>=2 && n===1) spawnMoblin(x,z,2);
+    else spawnBokoblin(x,z,Math.min(4,danger+1));
+  }
+  if(danger>=2){
+    const a=Math.PI*0.9;
+    spawnChuchu(c.pos.x+Math.cos(a)*5.4,c.pos.z+Math.sin(a)*5.4,Math.min(3,danger));
+  }
+  for(let k=startIdx;k<monsters.length;k++){
+    const m=monsters[k];
+    m.pos.y=Math.max(m.pos.y,c.floorY+0.08);
+    m.group.position.y=m.pos.y;
+    m.patrolCenter.copy(m.pos);
+    m.homeCave=c.name;
+  }
+});
+spawnFlyingGuardian(200, -250, 25);
+spawnFlyingGuardian(-350, 350, 22);
+spawnFlyingGuardian(700, -150, 30);
+spawnFlyingGuardian(-650, -600, 28);
+
+// ============================================================
+// 粒子
+// ============================================================
+const particleSystems=[];
+let _runeGlowTex=null;
+function runeGlowTex(){
+  if(_runeGlowTex) return _runeGlowTex;
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const g=c.getContext('2d');
+  const grd=g.createRadialGradient(64,64,2,64,64,62);
+  grd.addColorStop(0,'rgba(255,255,255,1)');
+  grd.addColorStop(0.22,'rgba(255,255,255,0.8)');
+  grd.addColorStop(0.55,'rgba(255,255,255,0.26)');
+  grd.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle=grd; g.fillRect(0,0,128,128);
+  _runeGlowTex=new THREE.CanvasTexture(c);
+  _runeGlowTex.colorSpace=THREE.SRGBColorSpace;
+  return _runeGlowTex;
+}
+function createParticles(count,size,color,blending=THREE.AdditiveBlending){
+  const geo=new THREE.BufferGeometry();
+  const pos=new Float32Array(count*3),col=new Float32Array(count*3);
+  for(let i=0;i<count;i++) pos[i*3+1]=-9999;
+  geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const pts=new THREE.Points(geo,new THREE.PointsMaterial({size,vertexColors:true,transparent:true,opacity:1,blending,depthWrite:false,map:runeGlowTex(),alphaTest:0.01}));
+  scene.add(pts);
+  const sys={pts,geo,vel:new Float32Array(count*3),life:new Float32Array(count),count};
+  particleSystems.push(sys); return sys;
+}
+function emitParticles(sys,x,y,z,n,speed,life,color){
+  const pos=sys.geo.attributes.position.array,col=sys.geo.attributes.color.array,vel=sys.vel;
+  let emitted=0;
+  for(let i=0;i<sys.count&&emitted<n;i++){
+    if(sys.life[i]>0) continue;
+    const idx=i*3; pos[idx]=x; pos[idx+1]=y; pos[idx+2]=z;
+    const th=rand(0,Math.PI*2),ph=Math.acos(rand(-1,1)),sp=speed*rand(0.3,1);
+    vel[idx]=Math.sin(ph)*Math.cos(th)*sp; vel[idx+1]=Math.cos(ph)*sp+rand(1,4); vel[idx+2]=Math.sin(ph)*Math.sin(th)*sp;
+    col[idx]=color.r; col[idx+1]=color.g; col[idx+2]=color.b;
+    sys.life[i]=life*rand(0.5,1.2); emitted++;
+  }
+  sys.geo.attributes.position.needsUpdate=true; sys.geo.attributes.color.needsUpdate=true;
+}
+function updateParticles(dt){
+  for(const sys of particleSystems){
+    const pos=sys.geo.attributes.position.array,vel=sys.vel; let any=false;
+    for(let i=0;i<sys.count;i++){
+      if(sys.life[i]<=0) continue; any=true; sys.life[i]-=dt;
+      const idx=i*3; vel[idx+1]-=5*dt;
+      pos[idx]+=vel[idx]*dt; pos[idx+1]+=vel[idx+1]*dt; pos[idx+2]+=vel[idx+2]*dt;
+      if(sys.life[i]<=0) pos[idx+1]=-9999;
+    }
+    if(any) sys.geo.attributes.position.needsUpdate=true;
+  }
+}
+const fireSys=createParticles(800,0.66,new THREE.Color(0xff7722));
+const sparkSys=createParticles(700,0.32,new THREE.Color(0xffee88));
+const waterSys=createParticles(500,0.5,new THREE.Color(0xaaddff),THREE.NormalBlending);
+
+const ELEM_INFO={fire:{name:'火',color:0xff6622},ice:{name:'冰',color:0x66ccff},thunder:{name:'雷',color:0xffdd44},light:{name:'光',color:0xffeeaa}};
+// ---- grass / scrub fires: fire spreads between nearby fuel patches ----
+const firePatches=[];
+const GRASS_FIRE_GEO=new THREE.ConeGeometry(0.42,1.35,6);
+const GRASS_FIRE_MAT1=new THREE.MeshBasicMaterial({color:0xff6622,transparent:true,opacity:0.85,blending:THREE.AdditiveBlending,depthWrite:false});
+const GRASS_FIRE_MAT2=new THREE.MeshBasicMaterial({color:0xffdd66,transparent:true,opacity:0.8,blending:THREE.AdditiveBlending,depthWrite:false});
+function igniteGrassAt(x,z){
+  if(isWater(x,z)) return;
+  if(firePatches.some(p=>Math.hypot(p.x-x,p.z-z)<1.6)) return;
+  if(firePatches.length>=16) return;
+  const y=terrainHeight(x,z);
+  const g=new THREE.Group();
+  const f1=new THREE.Mesh(GRASS_FIRE_GEO,GRASS_FIRE_MAT1); f1.position.y=0.65; g.add(f1);
+  const f2=new THREE.Mesh(new THREE.ConeGeometry(0.24,0.9,5),GRASS_FIRE_MAT2); f2.position.y=0.5; g.add(f2);
+  g.position.set(x,y,z); scene.add(g);
+  firePatches.push({x,z,y,group:g,f1,f2,life:rand(6,9),spreadT:rand(1.2,2.0),damageT:0,seed:rand(0,9)});
+  if(firePatches.length===1) toast('火焰点燃了草木！');
+}
+function updateFirePatches(dt){
+  const raining=weather.type==='rain'||weather.type==='thunder';
+  for(let i=firePatches.length-1;i>=0;i--){
+    const p=firePatches[i]; p.life-=dt; p.spreadT-=dt; p.damageT-=dt;
+    const t=performance.now()*0.004+p.seed;
+    p.f1.scale.set(1+Math.sin(t*1.6)*0.18,1+Math.sin(t*2.3)*0.28,1+Math.cos(t)*0.18);
+    p.f2.scale.set(1+Math.cos(t*1.8)*0.2,1+Math.sin(t*2.1)*0.25,1+Math.sin(t*1.4)*0.2);
+    p.group.rotation.y+=dt*1.3;
+    if(Math.random()<dt*10) emitParticles(fireSys,p.x,p.y+0.5,p.z,2,2.2,0.6,new THREE.Color(0xff7733));
+    if(raining){ p.life-=dt*3; }
+    if(p.spreadT<=0&&p.life>1.5&&firePatches.length<16&&!raining){
+      p.spreadT=rand(1.8,3.2);
+      const a=rand(0,6.28), r=rand(2.2,5.5);
+      const nx=p.x+Math.cos(a)*r, nz=p.z+Math.sin(a)*r;
+      if(terrainSlope(nx,nz)<0.9) igniteGrassAt(nx,nz);
+    }
+    if(p.damageT<=0){
+      p.damageT=0.45;
+      if(player.pos.distanceTo(new THREE.Vector3(p.x,p.y,p.z))<2.1) damagePlayer(1,'fire');
+      monsters.forEach(m=>{ if(m.state!=='dead'&&Math.hypot(m.pos.x-p.x,m.pos.z-p.z)<2.2) damageMonster(m,8,m.pos); });
+    }
+    if(p.life<=0){
+      scene.remove(p.group);
+      emitParticles(fireSys,p.x,p.y+0.4,p.z,20,3,1.2,new THREE.Color(0x555555));
+      firePatches.splice(i,1);
+    }
+  }
+}
+function applyElementalHit(m,elem){
+  if(!elem||elem==='light') return;
+  if(elem==='fire'){
+    if(m.frozen>0){ m.frozen=0; damageMonster(m,120,m.pos); emitParticles(waterSys,m.pos.x,m.pos.y+1,m.pos.z,40,6,0.8,new THREE.Color(0xaaddff)); toast('融化！'); }
+    m.burning=4; emitParticles(fireSys,m.pos.x,m.pos.y+1,m.pos.z,30,4,0.8,new THREE.Color(0xff6622));
+  } else if(elem==='ice'){
+    if(m.burning>0){ m.burning=0; damageMonster(m,120,m.pos); emitParticles(fireSys,m.pos.x,m.pos.y+1,m.pos.z,30,4,0.7,new THREE.Color(0x88ddff)); toast('蒸发！'); }
+    m.frozen=4; emitParticles(sparkSys,m.pos.x,m.pos.y+1,m.pos.z,30,4,0.8,new THREE.Color(0x66ccff));
+  } else if(elem==='thunder'){
+    m.shocked=2.5;
+    if(m.frozen>0 || player.wet>0){ damageMonster(m,80,m.pos); emitParticles(sparkSys,m.pos.x,m.pos.y+1,m.pos.z,60,8,0.7,new THREE.Color(0xffdd44)); }
+  }
+}
+function updateMonsterStatus(m,dt){
+  const baseScale=m.baseScale||1;
+  if(m.frozen>0){ m.frozen-=dt; m.group.scale.setScalar(baseScale*(0.9+Math.sin(performance.now()*0.01)*0.02)); }
+  else m.group.scale.setScalar(baseScale);
+  if(m.burning>0){
+    m.burning-=dt;
+    if(Math.random()<dt*10) emitParticles(fireSys,m.pos.x,m.pos.y+0.8,m.pos.z,3,2,0.5,new THREE.Color(0xff6622));
+    m.hp-=dt*8;
+    if(m.hp<=0&&m.state!=='dead'){ m.state='dead'; m.deadT=0; if(m.type==='guardian'||m.type==='flyingGuardian') onGuardianDeath(m); }
+  }
+  if(m.shocked>0) m.shocked-=dt;
+}
+
+// ============================================================
+// 符文 / 传送
+// ============================================================
+// ============================================================
+// 希卡符文特效库（纯程序化：符环 / 光壳 / 光束 / 闪光）
+// ============================================================
+const RUNE_CYAN=0x7fe9ff, RUNE_GOLD=0xffcf7a, RUNE_MAGENTA=0xff7fd8;
+const _runeGeoCache=new Map();
+function _runeGeo(key,build){
+  let g=_runeGeoCache.get(key);
+  if(!g){ g=build(); g.userData.runeShared=true; _runeGeoCache.set(key,g); }
+  return g;
+}
+function _runeDashedRing(segs,duty){
+  return _runeGeo('ring'+segs+'_'+duty,()=>{
+    const pos=[],idx=[],step=Math.PI*2/segs;
+    for(let i=0;i<segs;i+=2){
+      const a0=i*step,a1=a0+step*duty,b=pos.length/3;
+      const c0=Math.cos(a0),s0=Math.sin(a0),c1=Math.cos(a1),s1=Math.sin(a1);
+      pos.push(c0*0.945,0,s0*0.945, c0,0,s0, c1,0,s1, c1*0.945,0,s1*0.945);
+      idx.push(b,b+1,b+2,b,b+2,b+3);
+    }
+    const g=new THREE.BufferGeometry();
+    g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+    g.setIndex(idx);
+    return g;
+  });
+}
+const RUNE_RING_GEO=_runeDashedRing(64,0.5);
+const RUNE_RING_FINE_GEO=_runeDashedRing(96,0.3);
+const RUNE_RING_SOLID_GEO=_runeGeo('solidRing',()=>{
+  const g=new THREE.RingGeometry(0.94,1.0,64); g.rotateX(-Math.PI/2); return g;
+});
+const RUNE_SHOCK_GEO=_runeGeo('shockRing',()=>{
+  const g=new THREE.RingGeometry(0.975,1.0,96); g.rotateX(-Math.PI/2); return g;
+});
+const RUNE_SPHERE_GEO=_runeGeo('sphere',()=>new THREE.SphereGeometry(1,24,16));
+const RUNE_CAGE_GEO=_runeGeo('cage',()=>new THREE.IcosahedronGeometry(1,1));
+const RUNE_BEAM_GEO=_runeGeo('beam',()=>{ const g=new THREE.CylinderGeometry(0.16,0.30,1,10,1,true); g.translate(0,0.5,0); return g; });
+const RUNE_BEAM_CORE_GEO=_runeGeo('beamCore',()=>{ const g=new THREE.CylinderGeometry(0.05,0.09,1,7,1,true); g.translate(0,0.5,0); return g; });
+const RUNE_ICE_CORE_GEO=_runeGeo('iceCore',()=>new THREE.CylinderGeometry(0.09,0.16,2.2,6));
+
+function runeMat(color,opacity){
+  return new THREE.MeshBasicMaterial({color,transparent:true,opacity,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
+}
+function disposeRune(root){
+  root.traverse(o=>{
+    if(o.geometry&&!o.geometry.userData.runeShared) o.geometry.dispose();
+    if(o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());
+  });
+  if(root.parent) root.parent.remove(root);
+}
+const runeEffects=[];
+function addRuneEffect(dur,onUpdate,onDone){
+  const fx={t:0,dur,onUpdate,onDone}; runeEffects.push(fx); onUpdate(0,0); return fx;
+}
+function runeRingBurst(pos,color,startR,endR,dur,y,opacity,geo){
+  const mat=runeMat(color,opacity);
+  const mesh=new THREE.Mesh(geo||RUNE_RING_GEO,mat);
+  mesh.position.set(pos.x,pos.y+(y===undefined?0.08:y),pos.z);
+  mesh.scale.setScalar(startR);
+  scene.add(mesh);
+  addRuneEffect(dur,k=>{
+    const e=1-Math.pow(1-k,2.4);
+    mesh.scale.setScalar(startR+(endR-startR)*e);
+    mat.opacity=opacity*(1-k)*(1-k*0.15);
+  },()=>{ scene.remove(mesh); mat.dispose(); });
+}
+function runeFlashSphere(pos,color,startR,endR,dur,opacity){
+  const mat=runeMat(color,opacity);
+  const mesh=new THREE.Mesh(RUNE_SPHERE_GEO,mat);
+  mesh.position.copy(pos); mesh.scale.setScalar(startR); scene.add(mesh);
+  addRuneEffect(dur,k=>{
+    mesh.scale.setScalar(startR+(endR-startR)*(1-Math.pow(1-k,3)));
+    mat.opacity=opacity*Math.pow(1-k,1.6);
+  },()=>{ scene.remove(mesh); mat.dispose(); });
+}
+// soft camera-facing blast flare (much nicer than an additive sphere bubble)
+let _runeFireTex=null;
+function runeFireTex(){
+  if(_runeFireTex) return _runeFireTex;
+  const c=document.createElement('canvas'); c.width=c.height=128;
+  const g=c.getContext('2d');
+  const grd=g.createRadialGradient(64,64,4,64,64,63);
+  grd.addColorStop(0,'rgba(255,255,240,1)');
+  grd.addColorStop(0.18,'rgba(255,236,150,1)');
+  grd.addColorStop(0.42,'rgba(255,170,60,0.9)');
+  grd.addColorStop(0.72,'rgba(230,80,20,0.42)');
+  grd.addColorStop(1,'rgba(90,20,0,0)');
+  g.fillStyle=grd; g.fillRect(0,0,128,128);
+  _runeFireTex=new THREE.CanvasTexture(c);
+  _runeFireTex.colorSpace=THREE.SRGBColorSpace;
+  return _runeFireTex;
+}
+function runeFlare(pos,color,fromR,toR,dur,opacity,tex){
+  const mat=new THREE.SpriteMaterial({map:tex||runeGlowTex(),color,transparent:true,opacity,
+    blending:THREE.AdditiveBlending,depthWrite:false,toneMapped:false});
+  const s=new THREE.Sprite(mat);
+  s.position.copy(pos); s.scale.setScalar(fromR*2); scene.add(s);
+  addRuneEffect(dur,k=>{
+    s.scale.setScalar((fromR+(toR-fromR)*(1-Math.pow(1-k,3)))*2);
+    mat.opacity=opacity*Math.pow(1-k,1.4);
+  },()=>{ scene.remove(s); mat.dispose(); });
+}
+function runeShockShell(pos,color,dur,endR){
+  const mat=new THREE.MeshBasicMaterial({color,wireframe:true,transparent:true,opacity:0.55,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
+  const mesh=new THREE.Mesh(RUNE_CAGE_GEO,mat);
+  mesh.position.copy(pos); mesh.scale.setScalar(endR*0.15); scene.add(mesh);
+  addRuneEffect(dur,k=>{
+    mesh.scale.setScalar(endR*(0.15+0.85*k));
+    mesh.rotation.x+=0.04; mesh.rotation.y+=0.06;
+    mat.opacity=0.38*(1-k);
+  },()=>{ scene.remove(mesh); mat.dispose(); });
+}
+function runeSigil(pos,color,dur,radius,flat){
+  const g=new THREE.Group();
+  const a=new THREE.Mesh(RUNE_RING_GEO,runeMat(color,0.85));
+  const b=new THREE.Mesh(RUNE_RING_FINE_GEO,runeMat(color,0.6));
+  const c=new THREE.Mesh(RUNE_RING_SOLID_GEO,runeMat(color,0.35));
+  b.scale.setScalar(0.68); c.scale.setScalar(0.46);
+  g.add(a,b,c);
+  g.position.set(pos.x,pos.y+0.07,pos.z);
+  g.scale.setScalar(radius);
+  g.rotation.y=rand(0,Math.PI*2);
+  scene.add(g);
+  addRuneEffect(dur,k=>{
+    g.rotation.y+=0.012;
+    a.scale.setScalar(1+k*0.3); b.scale.setScalar(0.68-k*0.08);
+    a.material.opacity=0.85*(1-k); b.material.opacity=0.6*(1-k); c.material.opacity=0.35*(1-k);
+  },()=>disposeRune(g));
+}
+const runeLight=new THREE.PointLight(RUNE_CYAN,0,22,2);
+scene.add(runeLight);
+let runeLightT=0, runeLightDur=0.35, runeLightI=0;
+function flashRuneLight(pos,color,intensity,dur){
+  runeLight.position.copy(pos); runeLight.color.setHex(color);
+  runeLightT=dur; runeLightDur=dur; runeLightI=intensity;
+  runeLight.intensity=intensity;
+}
+let _runeFlashEl=null;
+function runeScreenFlash(){
+  if(!_runeFlashEl){ _runeFlashEl=document.createElement('div'); _runeFlashEl.id='runeFlash'; document.body.appendChild(_runeFlashEl); }
+  _runeFlashEl.classList.remove('on'); void _runeFlashEl.offsetWidth; _runeFlashEl.classList.add('on');
+}
+function pulseRuneSlot(i){
+  const el=document.querySelectorAll('.rune-slot')[i];
+  if(!el) return;
+  el.classList.remove('cast'); void el.offsetWidth; el.classList.add('cast');
+  setTimeout(()=>el.classList.remove('cast'),520);
+}
+
+const RUNES=[
+  {id:'bomb',name:'遥控炸弹',glyph:'💣',cd:6,cdLeft:0},
+  {id:'stasis',name:'静止器',glyph:'⏱',cd:10,cdLeft:0},
+  {id:'magnesis',name:'磁力抓取',glyph:'🧲',cd:4,cdLeft:0},
+  {id:'cryonis',name:'制冰器',glyph:'❄',cd:5,cdLeft:0},
+];
+let activeRune=0;
+const bombs=[];
+function makeBombMesh(){
+  const g=new THREE.Group();
+  const shellMat=new THREE.MeshStandardMaterial({color:0x2a2f3c,roughness:0.3,metalness:0.8,emissive:0x0a1622,emissiveIntensity:0.7});
+  const core=new THREE.Mesh(new THREE.SphereGeometry(0.36,14,10),shellMat);
+  core.castShadow=true; g.add(core);
+  const glowMat=runeMat(RUNE_CYAN,0.9);
+  const glow=new THREE.Mesh(RUNE_SPHERE_GEO,glowMat); glow.scale.setScalar(0.16); g.add(glow);
+  const bandMat=runeMat(RUNE_CYAN,0.75);
+  const b1=new THREE.Mesh(new THREE.TorusGeometry(0.385,0.022,5,26),bandMat); b1.rotation.x=Math.PI/2;
+  const b2=new THREE.Mesh(new THREE.TorusGeometry(0.385,0.022,5,26),bandMat); b2.rotation.y=Math.PI/2;
+  g.add(b1,b2);
+  g.userData={glow,bands:[b1,b2],glowMat,bandMat,shellMat};
+  return g;
+}
+function throwBomb(){
+  const mesh=makeBombMesh();
+  const fwd=new THREE.Vector3(Math.sin(player.yaw),0.35,Math.cos(player.yaw)).normalize();
+  mesh.position.copy(player.pos.clone().add(new THREE.Vector3(0,1.4,0)).add(fwd.clone().multiplyScalar(1.2)));
+  scene.add(mesh);
+  bombs.push({mesh,vel:fwd.multiplyScalar(18),life:3.5,radius:0.4,trailT:0});
+  SFX.rune(); runeScreenFlash(); pulseRuneSlot(0);
+}
+function explodeAt(p,radius=8,baseDmg=90,fire=true){
+  SFX.bomb();
+  const pp=p.clone?p.clone():new THREE.Vector3(p.x,p.y,p.z);
+  emitParticles(fireSys,p.x,p.y,p.z,150,12,1.0,new THREE.Color(0xff6622));
+  emitParticles(sparkSys,p.x,p.y,p.z,80,16,0.7,new THREE.Color(0xffeeaa));
+  // layered Sheikah blast: white flash, fireball, two ground rings, shell, sigil
+  const gy=terrainHeight(pp.x,pp.z);
+  runeFlare(pp,0xffffff,1.2,radius*0.42,0.18,0.9,runeFireTex());
+  runeFlare(pp,0xff8a3a,2.0,radius*0.62,0.36,0.4);
+  runeRingBurst(pp,0xffd090,1.4,radius*1.15,0.55,gy+0.10-pp.y,0.95,RUNE_SHOCK_GEO);
+  runeRingBurst(pp,0xff7a3a,0.9,radius*0.85,0.70,gy+0.06-pp.y,0.5,RUNE_RING_FINE_GEO);
+  runeSigil({x:pp.x,y:gy+0.02,z:pp.z},0xffb066,0.8,radius*0.55);
+  flashRuneLight(pp,0xffa04a,9,0.25);
+  monsters.forEach(m=>{ if(m.state==='dead') return; const d=m.pos.distanceTo(pp); if(d<radius){ damageMonster(m,Math.floor(baseDmg*(1-d/radius)),pp); if(fire) applyElementalHit(m,'fire'); } });
+  if(typeof physics!=='undefined') physics.applyRadialImpulse({x:p.x,y:p.y,z:p.z},radius+1.5,18,0.8);
+  if(player.pos.distanceTo(p)<Math.max(5,radius-2)) damagePlayer(1);
+  if(fire&&typeof igniteGrassAt==='function'){
+    for(let i=0;i<4;i++){
+      const a=rand(0,6.28), r=rand(1.5,radius*0.8);
+      const ix=p.x+Math.cos(a)*r, iz=p.z+Math.sin(a)*r;
+      if(terrainSlope(ix,iz)<1.0) igniteGrassAt(ix,iz);
+    }
+  }
+}
+function detonateBomb(bomb){
+  const p=bomb.mesh.position.clone();
+  scene.remove(bomb.mesh);
+  bomb.mesh.traverse(o=>{
+    if(o.geometry&&!o.geometry.userData.runeShared) o.geometry.dispose();
+    if(o.material) (Array.isArray(o.material)?o.material:[o.material]).forEach(m=>m.dispose());
+  });
+  explodeAt(p,8,90,true);
+}
+let stasisFX=null;
+function startStasisFX(m){
+  endStasisFX(false);
+  const size=Math.max(1.15,(m.radius||0.7)*2.55);
+  const g=new THREE.Group();
+  const shellMat=runeMat(RUNE_CYAN,0.10);
+  const shell=new THREE.Mesh(RUNE_SPHERE_GEO,shellMat);
+  const wireMat=new THREE.MeshBasicMaterial({color:0xbff6ff,wireframe:true,transparent:true,opacity:0.18,depthWrite:false,blending:THREE.AdditiveBlending,toneMapped:false});
+  const wire=new THREE.Mesh(RUNE_CAGE_GEO,wireMat);
+  const r1=new THREE.Mesh(RUNE_RING_GEO,runeMat(RUNE_CYAN,0.85));
+  const r2=new THREE.Mesh(RUNE_RING_FINE_GEO,runeMat(RUNE_GOLD,0.7)); r2.scale.setScalar(0.8);
+  const r3=new THREE.Mesh(RUNE_RING_GEO,runeMat(RUNE_CYAN,0.6)); r3.rotation.x=Math.PI/2; r3.scale.setScalar(0.94);
+  g.add(shell,wire,r1,r2,r3);
+  g.position.set(m.pos.x,m.pos.y+1,m.pos.z);
+  g.scale.setScalar(size*0.16);
+  scene.add(g);
+  stasisFX={group:g,m,shell,wire,rings:[r1,r2,r3],shellMat,wireMat,size,t:0,grow:0};
+  emitParticles(sparkSys,m.pos.x,m.pos.y+1,m.pos.z,70,8,1.3,new THREE.Color(0x9ff2ff));
+}
+function endStasisFX(burst){
+  if(!stasisFX) return;
+  const f=stasisFX; stasisFX=null;
+  if(burst){
+    const p=f.group.position.clone();
+    runeShockShell(p,0x9ff2ff,0.35,f.size*2.4);
+    runeRingBurst(p,0x9ff2ff,f.size*0.5,f.size*2.6,0.5,0.2,0.8,RUNE_RING_GEO);
+    emitParticles(sparkSys,p.x,p.y,p.z,70,11,1.0,new THREE.Color(0xbff6ff));
+    flashRuneLight(p,0x7fe9ff,16,0.3);
+  }
+  disposeRune(f.group);
+}
+function useStasis(){
+  let best=null,bestD=20;
+  monsters.forEach(m=>{ if(m.state==='dead') return; const d=m.pos.distanceTo(player.pos); if(d<bestD){bestD=d;best=m;} });
+  if(best){
+    best.staggerT=5; best.state='stagger'; best.vel.set(0,0,0);
+    startStasisFX(best);
+    runeSigil(best.pos.clone().setY(best.pos.y+0.05),RUNE_CYAN,0.9,2.2);
+    flashRuneLight(best.pos.clone().setY(best.pos.y+1),RUNE_CYAN,18,0.35);
+    emitParticles(sparkSys,best.pos.x,best.pos.y+1,best.pos.z,40,5,0.8,new THREE.Color(0x88ddff));
+    toast('静止器 · 锁定'); SFX.rune(); runeScreenFlash(); pulseRuneSlot(1);
+  }
+  else toast('静止器 · 未发现目标');
+}
+function updateStasisFX(dt,now){
+  const f=stasisFX; if(!f) return;
+  f.t+=dt;
+  const m=f.m;
+  const alive=m.state!=='dead'&&m.staggerT>0;
+  f.group.position.set(m.pos.x,m.pos.y+1,m.pos.z);
+  f.grow=Math.min(1,f.grow+dt*4.5);
+  const e=1-Math.pow(1-f.grow,3);
+  f.group.scale.setScalar(f.size*(0.16+0.84*e)*(1+Math.sin(now*5.5)*0.02));
+  f.shellMat.opacity=0.08+Math.sin(now*4.2)*0.03;
+  f.wire.rotation.y+=dt*0.55; f.wire.rotation.x+=dt*0.22;
+  f.rings[0].rotation.y+=dt*0.9;
+  f.rings[1].rotation.y-=dt*1.5; f.rings[1].rotation.x=Math.sin(now*0.7)*0.25;
+  f.rings[2].rotation.z+=dt*1.3;
+  if(!alive) endStasisFX(true);
+}
+
+let magnesisTarget=null, magnesisFX=null;
+const _mvFrom=new THREE.Vector3(), _mvTo=new THREE.Vector3(), _mvDir=new THREE.Vector3(), _mvQ=new THREE.Quaternion(), _mvUp=new THREE.Vector3(0,1,0);
+function startMagnesisFX(chest){
+  endMagnesisFX(false);
+  const beamMat=runeMat(RUNE_MAGENTA,0.6), coreMat=runeMat(0xffe6fb,0.95);
+  const beam=new THREE.Mesh(RUNE_BEAM_GEO,beamMat);
+  const core=new THREE.Mesh(RUNE_BEAM_CORE_GEO,coreMat);
+  const cage=new THREE.Group();
+  const rm1=runeMat(RUNE_MAGENTA,0.85), rm2=runeMat(0xffe6fb,0.45), rm3=runeMat(RUNE_CYAN,0.55);
+  const c1=new THREE.Mesh(RUNE_RING_GEO,rm1);
+  const c2=new THREE.Mesh(RUNE_RING_GEO,rm2); c2.rotation.x=Math.PI/2;
+  const c3=new THREE.Mesh(RUNE_RING_FINE_GEO,rm3); c3.rotation.x=Math.PI/2; c3.rotation.z=Math.PI/2; c3.scale.setScalar(0.9);
+  cage.add(c1,c2,c3);
+  scene.add(beam,core,cage);
+  magnesisFX={chest,beam,core,cage,beamMat,coreMat,ringMats:[rm1,rm2,rm3],t:0,drip:0};
+  emitParticles(sparkSys,chest.pos.x,chest.pos.y+0.6,chest.pos.z,30,4,0.8,new THREE.Color(0xffb8ec));
+}
+function endMagnesisFX(burst){
+  if(!magnesisFX) return;
+  const f=magnesisFX; magnesisFX=null;
+  if(burst){
+    const t=(f.chest.pos||f.chest.group.position).clone();
+    runeRingBurst(t,0xff7fd8,1.0,3.4,0.45,0.5,0.85);
+    emitParticles(sparkSys,t.x,t.y+0.6,t.z,50,6,1.0,new THREE.Color(0xffb8ec));
+    flashRuneLight(t,0xff7fd8,14,0.3);
+  }
+  scene.remove(f.beam,f.core,f.cage);
+  f.beamMat.dispose(); f.coreMat.dispose(); f.ringMats.forEach(m=>m.dispose());
+}
+function toggleMagnesis(){
+  if(magnesisTarget){ magnesisTarget=null; endMagnesisFX(true); toast('磁力 · 释放'); return; }
+  let best=null,bestD=30;
+  chests.forEach(c=>{ if(!c.opened){ const d=c.pos.distanceTo(player.pos); if(d<bestD){bestD=d;best=c;} }});
+  if(best){ magnesisTarget=best; startMagnesisFX(best); toast('磁力 · 抓取'); SFX.rune(); runeScreenFlash(); pulseRuneSlot(2); }
+  else toast('磁力 · 无金属目标');
+}
+function updateMagnesisFX(dt,now){
+  const f=magnesisFX; if(!f) return;
+  const t=f.chest.pos||f.chest.group.position;
+  _mvFrom.set(player.pos.x,player.pos.y+1.35,player.pos.z);
+  _mvTo.set(t.x,t.y+0.6,t.z);
+  _mvDir.copy(_mvTo).sub(_mvFrom);
+  const len=_mvDir.length();
+  if(len>0.01){
+    _mvQ.setFromUnitVectors(_mvUp,_mvDir.normalize());
+    f.beam.position.copy(_mvFrom); f.beam.quaternion.copy(_mvQ);
+    f.core.position.copy(_mvFrom); f.core.quaternion.copy(_mvQ);
+  }
+  const pulse=0.8+Math.sin(now*16)*0.22;
+  f.beam.scale.set(pulse,len,1);
+  f.core.scale.set(0.9+Math.sin(now*23)*0.3,len,1);
+  f.beamMat.opacity=0.42+Math.sin(now*21)*0.14;
+  f.coreMat.opacity=0.72+Math.sin(now*29)*0.2;
+  f.cage.position.copy(_mvTo);
+  f.cage.rotation.y+=dt*1.8; f.cage.rotation.x+=dt*0.7;
+  f.drip+=dt;
+  if(f.drip>0.07){
+    f.drip=0;
+    const k=Math.random();
+    emitParticles(sparkSys,_mvFrom.x+(_mvTo.x-_mvFrom.x)*k,_mvFrom.y+(_mvTo.y-_mvFrom.y)*k,_mvFrom.z+(_mvTo.z-_mvFrom.z)*k,1,0.9,0.5,new THREE.Color(0xffc8f0));
+  }
+}
+
+const iceBlocks=[];
+function makeIcePillar(){
+  const root=new THREE.Group();
+  const crystal=new THREE.Group();
+  const mat=new THREE.MeshStandardMaterial({color:0x9fe4ff,emissive:0x1f5f7a,emissiveIntensity:0.3,transparent:true,opacity:0.9,roughness:0.14,metalness:0.15,flatShading:true});
+  const main=new THREE.Mesh(new THREE.CylinderGeometry(0.34,1.02,1.15,6,1),mat);
+  main.position.y=0.575; main.castShadow=true; main.receiveShadow=true; crystal.add(main);
+  const tip=new THREE.Mesh(new THREE.ConeGeometry(0.34,0.3,6),mat);
+  tip.position.y=1.3; tip.castShadow=true; crystal.add(tip);
+  const shardMat=mat.clone();
+  const shard=new THREE.Mesh(new THREE.ConeGeometry(0.2,0.8,5),shardMat);
+  shard.position.set(0.55,0.4,0.18); shard.rotation.z=-0.32; shard.castShadow=true; crystal.add(shard);
+  const shard2=new THREE.Mesh(new THREE.ConeGeometry(0.14,0.6,5),shardMat);
+  shard2.position.set(-0.5,0.3,-0.3); shard2.rotation.z=0.4; crystal.add(shard2);
+  const coreMat=runeMat(0xbff4ff,0.85);
+  const core=new THREE.Mesh(RUNE_ICE_CORE_GEO,coreMat);
+  core.position.y=0.5; core.scale.y=0.45; crystal.add(core);
+  const r1=new THREE.Mesh(RUNE_RING_GEO,runeMat(0x8fe8ff,0.8));
+  r1.position.y=0.05; r1.scale.setScalar(1.25);
+  const r2=new THREE.Mesh(RUNE_RING_FINE_GEO,runeMat(0xd8fbff,0.55));
+  r2.position.y=0.05; r2.scale.setScalar(0.95);
+  root.add(crystal,r1,r2);
+  root.userData={crystal,ring:r1,ring2:r2,mat,shardMat,coreMat,core};
+  return root;
+}
+function useCryonis(){
+  const px=player.pos.x+Math.sin(player.yaw)*5, pz=player.pos.z+Math.cos(player.yaw)*5;
+  if(!isWater(px,pz)){ toast('制冰器 · 需在水边使用'); return; }
+  const g=makeIcePillar();
+  g.position.set(px,WATER_LEVEL+0.25,pz);
+  g.scale.set(1,0.03,1);
+  scene.add(g);
+  iceBlocks.push({mesh:g,life:15,topY:WATER_LEVEL+1.68,grow:0});
+  emitParticles(waterSys,px,WATER_LEVEL,pz,50,4,0.8,new THREE.Color(0xbbeeff));
+  emitParticles(sparkSys,px,WATER_LEVEL+0.4,pz,26,7,0.8,new THREE.Color(0xd8fbff));
+  runeRingBurst({x:px,y:WATER_LEVEL+0.1,z:pz},0x9fe8ff,0.6,3.2,0.6,0,0.7);
+  runeSigil({x:px,y:WATER_LEVEL+0.05,z:pz},0x9fe8ff,1.2,1.6,true);
+  flashRuneLight({x:px,y:WATER_LEVEL+0.6,z:pz},0x9fe8ff,16,0.4);
+  toast('制冰器 · 生成冰柱'); SFX.rune(); runeScreenFlash(); pulseRuneSlot(3);
+}
+
+const teleportFXs=[]; const shockwaves=[]; let teleporting=false;
+function updateShockwaves(dt){
+  for(let i=shockwaves.length-1;i>=0;i--){
+    const s=shockwaves[i]; s.t+=dt;
+    const k=clamp(s.t/s.dur,0,1);
+    s.mesh.scale.setScalar(1+k*8);
+    s.mat.opacity=0.8*(1-k);
+    if(k>=1){ scene.remove(s.mesh); s.mesh.geometry.dispose(); s.mat.dispose(); shockwaves.splice(i,1); }
+  }
+}
+function playTeleportFX(pos,color=0x66ccff,scale=1.0){
+  const g=new THREE.Group(),c=new THREE.Color(color);
+  const beamMat=new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:0.55,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});
+  const beamH=25*scale;
+  const beam=new THREE.Mesh(new THREE.CylinderGeometry(1.0*scale,2.0*scale,beamH,16,1,true),beamMat);
+  beam.position.y=beamH/2; g.add(beam);
+  const ringMat=new THREE.MeshBasicMaterial({color:c,transparent:true,opacity:0.9,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});
+  const ring=new THREE.Mesh(new THREE.RingGeometry(1.0*scale,2.6*scale,28),ringMat);
+  ring.rotation.x=-Math.PI/2; ring.position.y=0.2; g.add(ring);
+  const ring2Mat=ringMat.clone();
+  const ring2=new THREE.Mesh(new THREE.RingGeometry(0.5*scale,1.5*scale,24),ring2Mat);
+  ring2.rotation.x=-Math.PI/2; ring2.position.y=2.5*scale; g.add(ring2);
+  // Sheikah sigil rings: one on the ground, one spinning vertical halo
+  const runeMat1=runeMat(color,0.9), runeMat2=runeMat(color,0.55);
+  const rune1=new THREE.Mesh(RUNE_RING_GEO,runeMat1); rune1.scale.setScalar(3.0*scale); rune1.position.y=0.06; g.add(rune1);
+  const rune2=new THREE.Mesh(RUNE_RING_FINE_GEO,runeMat2); rune2.scale.setScalar(2.0*scale); rune2.rotation.x=Math.PI/2; rune2.position.y=3.0*scale; g.add(rune2);
+  g.position.copy(pos); scene.add(g);
+  teleportFXs.push({group:g,beam,ring,ring2,rune1,rune2,beamMat,ringMat,ring2Mat,runeMat1,runeMat2,t:0,dur:1.5});
+  emitParticles(sparkSys,pos.x,pos.y+2,pos.z,100,10*scale,1.5,c);
+}
+function updateTeleportFX(dt){
+  for(let i=teleportFXs.length-1;i>=0;i--){
+    const f=teleportFXs[i]; f.t+=dt; const k=f.t/f.dur;
+    f.beamMat.opacity=0.55*Math.max(0,1-k); f.ringMat.opacity=0.9*Math.max(0,1-k); f.ring2Mat.opacity=0.8*Math.max(0,1-k);
+    f.runeMat1.opacity=0.9*Math.max(0,1-k); f.runeMat2.opacity=0.55*Math.max(0,1-k);
+    f.beam.scale.x=f.beam.scale.z=1+k*0.7;
+    f.ring.scale.setScalar(1+k*3.0); f.ring2.scale.setScalar(1+k*2.0); f.ring2.position.y=2.5+k*5;
+    f.rune1.scale.setScalar(3.0*(1+k*1.2)); f.rune1.rotation.y+=dt*1.6;
+    f.rune2.rotation.z+=dt*1.2; f.rune2.position.y+=dt*1.2;
+    f.group.rotation.y+=dt*2.5;
+    if(f.t>=f.dur){
+      scene.remove(f.group);
+      f.beamMat.dispose(); f.ringMat.dispose(); f.ring2Mat.dispose(); f.runeMat1.dispose(); f.runeMat2.dispose();
+      f.beam.geometry.dispose(); f.ring.geometry.dispose(); f.ring2.geometry.dispose();
+      teleportFXs.splice(i,1);
+    }
+  }
+}
+
+// ============================================================
+// 希卡符文特效每帧更新
+// ============================================================
+function updateRuneFX(dt){
+  const now=performance.now()*0.001;
+  for(let i=runeEffects.length-1;i>=0;i--){
+    const f=runeEffects[i]; f.t+=dt;
+    const k=Math.min(1,f.t/f.dur);
+    f.onUpdate(k,dt);
+    if(k>=1){ if(f.onDone) f.onDone(); runeEffects.splice(i,1); }
+  }
+  if(runeLightT>0){
+    runeLightT=Math.max(0,runeLightT-dt);
+    runeLight.intensity=runeLightI*(runeLightT/runeLightDur)*(runeLightT/runeLightDur);
+  } else runeLight.intensity=0;
+
+  for(let i=bombs.length-1;i>=0;i--){
+    const b=bombs[i]; b.life-=dt; b.vel.y-=22*dt;
+    b.mesh.position.addScaledVector(b.vel,dt);
+    const gh=terrainHeight(b.mesh.position.x,b.mesh.position.z);
+    if(b.mesh.position.y<gh+b.radius){ b.mesh.position.y=gh+b.radius; b.vel.y*=-0.35; b.vel.x*=0.7; b.vel.z*=0.7; }
+    b.mesh.rotation.x+=dt*4; b.mesh.rotation.y+=dt*3;
+    const ud=b.mesh.userData;
+    ud.bands[0].rotation.z+=dt*2.4; ud.bands[1].rotation.x+=dt*1.8;
+    ud.glow.scale.setScalar(0.13+Math.sin(now*18)*0.045);
+    ud.bandMat.opacity=0.55+Math.sin(now*14)*0.2;
+    b.trailT-=dt;
+    if(b.trailT<=0){
+      b.trailT=0.055;
+      emitParticles(sparkSys,b.mesh.position.x,b.mesh.position.y,b.mesh.position.z,2,0.6,0.45,new THREE.Color(0x8fe8ff));
+    }
+    if(b.life<=0){ detonateBomb(b); bombs.splice(i,1); }
+  }
+
+  updateStasisFX(dt,now);
+  if(magnesisTarget){
+    const t=magnesisTarget.pos||magnesisTarget.mesh.position;
+    const to=player.pos.clone().setY(player.pos.y+1).sub(t);
+    if(to.length()>4){ t.add(to.normalize().multiplyScalar(dt*8)); if(magnesisTarget.mesh) magnesisTarget.mesh.position.copy(t); else if(magnesisTarget.group){ magnesisTarget.group.position.copy(t); magnesisTarget.pos.copy(t); } }
+  }
+  updateMagnesisFX(dt,now);
+
+  for(let i=iceBlocks.length-1;i>=0;i--){
+    const b=iceBlocks[i]; b.life-=dt;
+    const ud=b.mesh.userData;
+    b.grow=Math.min(1,b.grow+dt*3.4);
+    const e=1-Math.pow(1-b.grow,3);
+    b.mesh.scale.y=Math.max(0.03,e*(1+0.12*Math.sin(b.grow*Math.PI)));
+    ud.ring.rotation.y+=dt*0.7; ud.ring2.rotation.y-=dt*1.1;
+    ud.core.scale.y=1+Math.sin(now*4)*0.06;
+    if(b.life<0.9){
+      const k=1-clamp(b.life/0.9,0,1);
+      b.mesh.scale.x=b.mesh.scale.z=1-k*0.3;
+      ud.mat.opacity=0.86*(1-k); ud.shardMat.opacity=0.86*(1-k);
+      ud.coreMat.opacity=0.85*(1-k); ud.ring.material.opacity=0.8*(1-k); ud.ring2.material.opacity=0.55*(1-k);
+    }
+    if(b.life<=0){
+      const p=b.mesh.position;
+      emitParticles(waterSys,p.x,p.y+0.5,p.z,50,4,0.9,new THREE.Color(0xbbeeff));
+      emitParticles(sparkSys,p.x,p.y+0.5,p.z,26,6,0.8,new THREE.Color(0xd8fbff));
+      runeRingBurst(p,0x9fe8ff,0.8,3.4,0.5,0.3,0.75);
+      flashRuneLight({x:p.x,y:p.y+0.8,z:p.z},0x9fe8ff,10,0.25);
+      disposeRune(b.mesh);
+      iceBlocks.splice(i,1);
+    }
+  }
+}
+function teleportTo(shrine){
+  if(teleporting||!shrine.activated) return;
+  if(player.state==='dead') return;
+  if(player.riding) dismountHorse(true);
+  teleporting=true; closeAllPanels(); SFX.teleport();
+  playTeleportFX(player.pos.clone(),0x66ccff,1.5);
+  setTimeout(()=>{
+    const gx=shrine.pos.x, gz=shrine.pos.z+6, gy=terrainHeight(gx,gz);
+    player.pos.set(gx,gy+0.05,gz); player.vel.set(0,0,0); player.impulse.set(0,0,0);
+    player.onGround=true; player.yaw=Math.PI;
+    player.group.position.copy(player.pos); player.group.rotation.set(0,player.yaw,0);
+    camYaw=0; camPitch=0.28; camDist=9; player.camDistCur=9;
+    const camTarget=player.pos.clone().add(new THREE.Vector3(0,1.5,0));
+    camera.position.copy(camTarget.clone().add(new THREE.Vector3(0,Math.sin(camPitch),Math.cos(camPitch)).multiplyScalar(camDist)));
+    playTeleportFX(player.pos.clone(),0x88e0ff,1.5);
+    SFX.rune(); toast('传送 · '+shrine.name);
+    teleporting=false;
+    checkShrineArrival(shrine);
+  },700);
+}
+function checkShrineArrival(shrine){
+  if(shrine.type==='divine'&&!shrine.activated){ activateShrine(shrine); handleDivineArrival(shrine); }
+  if(shrine.type==='master'&&!shrine.activated){ activateShrine(shrine); toast('克洛格森林 · 大师剑的台座在前方'); }
+  if(shrine.type==='ganon'&&!shrine.activated){ activateShrine(shrine); startGanonFight(); }
+  if(shrine.type==='dlc'&&!shrine.activated){ activateShrine(shrine); startDLC(); }
+}
+
+// 神庙解谜
+let currentShrine=null, shrinePuzzleState=null;
+function openShrinePuzzle(shrine){
+  currentShrine=shrine;
+  $('shrineOverlay').style.display='flex';
+  $('shrineTitle').textContent=shrine.name;
+  $('shrineDesc').textContent='希卡之石的试炼。完成谜题以通过试炼。';
+  const puzzle=$('shrinePuzzle'); puzzle.innerHTML='';
+  const hint=$('shrineHint'); hint.textContent=''; hint.style.color='';
+  const type=Math.random()<0.5?'lights':'sequence';
+  shrinePuzzleState={type,solved:false,inputIdx:0};
+  if(type==='lights'){
+    const grid=document.createElement('div'); grid.className='puzzle-grid';
+    for(let i=0;i<9;i++){
+      const cell=document.createElement('div'); cell.className='puzzle-cell';
+      cell.textContent=['◆','◇','●'][randInt(0,2)];
+      cell.addEventListener('click',()=>{
+        if(shrinePuzzleState.solved) return;
+        cell.classList.toggle('lit');
+        if(grid.querySelectorAll('.lit').length===9) solveShrine();
+      });
+      grid.appendChild(cell);
+    }
+    puzzle.appendChild(grid);
+    hint.textContent='点击格子全部点亮';
+  } else {
+    const seqEl=document.createElement('div');
+    seqEl.style.fontSize='28px'; seqEl.style.letterSpacing='6px';
+    const symbols=['◆','◇','●','■','▲'];
+    const sequence=[];
+    for(let i=0;i<4;i++) sequence.push(symbols[randInt(0,symbols.length-1)]);
+    seqEl.textContent=sequence.join(' ');
+    puzzle.appendChild(seqEl);
+    hint.textContent='记住闪烁顺序后点击下方符号';
+    let idx=0;
+    const flash=setInterval(()=>{
+      if(idx>=sequence.length){ clearInterval(flash); return; }
+      seqEl.style.opacity='0.3';
+      setTimeout(()=>{ seqEl.style.opacity='1'; idx++; },200);
+    },400);
+    const btns=document.createElement('div'); btns.style.display='flex'; btns.style.gap='8px'; btns.style.marginTop='12px';
+    symbols.forEach(sym=>{
+      const b=document.createElement('div'); b.className='puzzle-cell'; b.style.width='48px'; b.style.height='48px';
+      b.textContent=sym;
+      b.addEventListener('click',()=>{
+        if(shrinePuzzleState.solved) return;
+        if(sym===sequence[shrinePuzzleState.inputIdx]){
+          shrinePuzzleState.inputIdx++;
+          if(shrinePuzzleState.inputIdx>=sequence.length) solveShrine();
+        } else {
+          shrinePuzzleState.inputIdx=0;
+          hint.textContent='顺序错误，重新开始'; hint.style.color='#ff8866';
+          setTimeout(()=>{ hint.style.color=''; hint.textContent='记住闪烁顺序后点击下方符号'; },1200);
+        }
+      });
+      btns.appendChild(b);
+    });
+    puzzle.appendChild(btns);
+  }
+}
+function solveShrine(){
+  if(shrinePuzzleState.solved) return;
+  shrinePuzzleState.solved=true;
+  SFX.shrineSolve();
+  $('shrineHint').textContent='试炼通过！'; $('shrineHint').style.color='#6fbf3f';
+  player.trialPass++;
+  if(currentShrine&&currentShrine.virtualIndex!==undefined){
+    const idx=currentShrine.virtualIndex;
+    if(!virtualShrineCompleted(idx)){
+      quest.virtualShrines.push(idx);
+      quest.spiritOrbs=(quest.spiritOrbs||0)+1;
+      emitParticles(sparkSys,player.pos.x,player.pos.y+2,player.pos.z,80,7,1.3,new THREE.Color(0xaaddff));
+      toast('投影试炼完成 · 获得灵魂宝珠 ×1');
+    }
+    updateQuestHUD();
+    renderJournal();
+    setTimeout(()=>{ closeShrinePuzzle(); },1600);
+    return;
+  }
+  if(currentShrine&&!currentShrine.challengeCleared){
+    currentShrine.challengeCleared=true;
+    player.maxHp+=1; player.hp=Math.min(player.maxHp,player.hp+1);
+    updateHearts(); updateQuestHUD();
+    toast('试炼通过 · 获得心之容器');
+  }
+  setTimeout(()=>{ closeShrinePuzzle(); },1500);
+}
+function closeShrinePuzzle(){
+  $('shrineOverlay').style.display='none';
+  $('shrineHint').style.color='';
+  currentShrine=null;
+}
+
+// 四神兽 / 盖侬 / DLC
+function handleDivineArrival(shrine){
+  const nameMap={'水之神兽 · 瓦·露塔':'water','风之神兽 · 瓦·梅德':'wind','火之神兽 · 瓦·鲁达尼亚':'fire','雷之神兽 · 瓦·娜波力斯':'thunder'};
+  const id=nameMap[shrine.name]; if(!id) return;
+  if(quest.divineCleared[id]){ toast('此神兽已解放'); return; }
+  if(!divineBosses[id] || divineBosses[id].state === 'dead'){
+    startDialog(shrine.name,['神兽内部弥漫着灾厄的气息。','四咒盖侬之一就在前方。','击败它，解放英杰的灵魂。']);
+    spawnDivineBoss(id,shrine.pos);
+  }
+}
+const divineBosses={};
+const BLIGHT_INFO={
+  water:{col:0x2a8ac8,acc:0x88e8ff,name:'水咒盖侬',weapon:'trident',desc:'水之神兽的灾厄幻影，操纵冰与水。'},
+  fire:{col:0xcc4a22,acc:0xffaa44,name:'火咒盖侬',weapon:'hammer',desc:'火之神兽的灾厄幻影，以熔岩战锤粉碎敌人。'},
+  wind:{col:0x4aa46a,acc:0xaaffcc,name:'风咒盖侬',weapon:'cannon',desc:'风之神兽的灾厄幻影，悬浮空中并发射风暴弹。'},
+  thunder:{col:0xc8a22a,acc:0xffee88,name:'雷咒盖侬',weapon:'scimitar',desc:'雷之神兽的灾厄幻影，以雷电瞬移与连斩攻击。'},
+};
+function buildDivineBossModel(id){
+  const info=BLIGHT_INFO[id]||BLIGHT_INFO.fire;
+  const g=new THREE.Group();
+  const col=info.col,acc=info.acc;
+  const bodyMat=toon(col,{shadowColor:new THREE.Color(col).multiplyScalar(0.32).getHex(),steps:3,emissive:col,emissiveIntensity:0.35,rimColor:acc});
+  const darkMat=toon(0x181820,{shadowColor:0x050508,steps:3,rimColor:acc});
+  const metal=toon(0x7a7a84,{shadowColor:0x2a2a32,steps:4,rimColor:0xffffff});
+  const glowMat=new THREE.MeshStandardMaterial({color:acc,emissive:acc,emissiveIntensity:2.2,roughness:0.18});
+  const eyeMat=new THREE.MeshStandardMaterial({color:0xffee88,emissive:0xffaa00,emissiveIntensity:2.6,roughness:0.1});
+  // torso / core
+  const core=new THREE.Mesh(new THREE.IcosahedronGeometry(1.55,1),bodyMat);
+  core.position.y=3.4; core.castShadow=true; g.add(core);
+  const chest=new THREE.Mesh(new THREE.SphereGeometry(0.95,10,8),darkMat);
+  chest.position.set(0,2.4,0); chest.scale.set(1.15,0.8,0.7); g.add(chest);
+  const eye=new THREE.Mesh(new THREE.SphereGeometry(0.22,8,6),eyeMat);
+  eye.position.set(0,3.55,1.35); g.add(eye);
+  for(const s of [-1,1]){
+    for(let i=0;i<3;i++){
+      const spike=new THREE.Mesh(new THREE.ConeGeometry(0.16,1.2+i*0.14,5),darkMat);
+      spike.position.set(s*1.45,3.8+i*0.55,-0.25); spike.rotation.z=s*(0.35+i*0.15); g.add(spike);
+    }
+  }
+  // crown / crest
+  for(let i=0;i<3;i++){
+    const crest=new THREE.Mesh(new THREE.ConeGeometry(0.2,1.3,5),acc===0xffee88?metal:bodyMat);
+    crest.position.set((i-1)*0.55,4.7,0); crest.rotation.z=(i-1)*0.25; g.add(crest);
+  }
+  // arms and weapons
+  const arms=[];
+  for(const s of [-1,1]){
+    const shoulder=new THREE.Group(); shoulder.position.set(s*1.55,3.9,0); g.add(shoulder);
+    const upper=new THREE.Mesh(new THREE.CylinderGeometry(0.24,0.19,1.25,7),bodyMat);
+    upper.position.y=-0.6; upper.rotation.z=s*0.5; shoulder.add(upper);
+    const fore=new THREE.Group(); fore.position.set(s*0.62,-1.15,0); shoulder.add(fore);
+    const lower=new THREE.Mesh(new THREE.CylinderGeometry(0.17,0.2,1.1,7),darkMat);
+    lower.position.y=-0.5; fore.add(lower);
+    const hand=new THREE.Mesh(new THREE.SphereGeometry(0.24,7,5),glowMat);
+    hand.position.y=-1.05; fore.add(hand);
+    arms.push({shoulder,fore});
+    if(s>0){
+      const weapon=new THREE.Group();
+      if(info.weapon==='hammer'){
+        const haft=new THREE.Mesh(new THREE.CylinderGeometry(0.08,0.1,2.6,6),metal); haft.rotation.x=0.4; weapon.add(haft);
+        const head=new THREE.Mesh(new THREE.BoxGeometry(0.8,0.8,0.8),bodyMat); head.position.y=-1.2; head.rotation.x=0.4; weapon.add(head);
+        const glow=new THREE.Mesh(new THREE.BoxGeometry(0.85,0.1,0.85),glowMat); glow.position.y=-1.2; glow.rotation.x=0.4; weapon.add(glow);
+      } else if(info.weapon==='trident'){
+        const shaft=new THREE.Mesh(new THREE.CylinderGeometry(0.06,0.07,3.0,6),metal); shaft.rotation.x=0.35; weapon.add(shaft);
+        for(let i=0;i<3;i++){
+          const prong=new THREE.Mesh(new THREE.ConeGeometry(0.09,0.9,5),glowMat);
+          prong.position.set((i-1)*0.25,-1.55,0.3); prong.rotation.x=0.35; weapon.add(prong);
+        }
+      } else if(info.weapon==='cannon'){
+        const barrel=new THREE.Mesh(new THREE.CylinderGeometry(0.3,0.42,1.8,8),darkMat); barrel.rotation.x=Math.PI/2; barrel.position.z=0.65; weapon.add(barrel);
+        const muzzle=new THREE.Mesh(new THREE.TorusGeometry(0.34,0.08,5,12),glowMat); muzzle.position.z=1.55; weapon.add(muzzle);
+      } else {
+        const blade=new THREE.Mesh(new THREE.BoxGeometry(0.12,2.1,0.35),metal); blade.position.set(0,0,-0.6); blade.rotation.x=0.3; weapon.add(blade);
+        const edge=new THREE.Mesh(new THREE.BoxGeometry(0.05,2.0,0.08),glowMat); edge.position.set(0,0,-0.78); edge.rotation.x=0.3; weapon.add(edge);
+      }
+      weapon.position.set(0,-1.15,0); fore.add(weapon); g.userData.weapon=weapon;
+    }
+  }
+  // legs or floating base
+  if(id==='wind'){
+    const turbine=new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.8,0.5,10),metal);
+    turbine.position.y=0.8; turbine.rotation.x=Math.PI/2; g.add(turbine);
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(0.9,0.06,5,20),glowMat); ring.rotation.x=Math.PI/2; ring.position.y=0.5; g.add(ring);
+    g.userData.floating=true;
+  } else {
+    for(const s of [-1,1]){
+      const thigh=new THREE.Mesh(new THREE.CylinderGeometry(0.25,0.2,1.4,7),darkMat);
+      thigh.position.set(s*0.6,1.35,0); thigh.rotation.z=s*0.16; g.add(thigh);
+      const shin=new THREE.Mesh(new THREE.CylinderGeometry(0.18,0.24,1.2,7),bodyMat);
+      shin.position.set(s*0.72,0.35,0.1); shin.rotation.x=0.25; g.add(shin);
+      const foot=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.24,0.9),darkMat);
+      foot.position.set(s*0.72,0.08,0.3); g.add(foot);
+    }
+  }
+  const aura=new THREE.Mesh(new THREE.TorusGeometry(1.9,0.035,5,32),
+    new THREE.MeshBasicMaterial({color:acc,transparent:true,opacity:0.45,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+  aura.rotation.x=Math.PI/2; aura.position.y=0.4; g.add(aura);
+  g.userData.arms=arms; g.userData.aura=aura;
+  return {group:g,core,eye,arms,aura};
+}
+function spawnDivineBoss(id,center){
+  const h=terrainHeight(center.x,center.z+15);
+  const info=BLIGHT_INFO[id]||BLIGHT_INFO.fire;
+  const model=buildDivineBossModel(id);
+  const g=model.group;
+  g.position.set(center.x,h,center.z+15); scene.add(g);
+  const boss={
+    id,type:'divineBoss',name:info.name,
+    hp:700,maxHp:700,group:g,core:model.core,eye:model.eye,parts:model,
+    pos:new THREE.Vector3(center.x,h,center.z+15),center:center.clone(),
+    state:'combat',attackCD:2,staggerT:0,radius:1.8,damage:15,animT:rand(0,4),
+    frozen:0,burning:0,shocked:0,weakPoint:'eye',alertLevel:3,stealthAware:false,
+  };
+  monsters.push(boss); divineBosses[id]=boss;
+  SFX.bossRoar(); toast(boss.name+' 出现！');
+  registerCompendium(boss.name,{type:'BOSS',hp:700,desc:info.desc});
+  showBossBar(boss);
+}
+function onDivineBossDefeated(boss){
+  const id=boss.id;
+  quest.divineCleared[id]=true;
+  player.maxHp+=1; player.hp=Math.min(player.maxHp,player.hp+1);
+  updateHearts(); grantChampionSkill(id);
+  const nameMap={water:'米法',wind:'力巴尔',fire:'达尔克尔',thunder:'乌尔波扎'};
+  const skillNameMap={water:'米法的祈福',wind:'力巴尔的勇猛',fire:'达尔克尔的守护',thunder:'乌尔波扎的愤怒'};
+  startDialog(nameMap[id],[`……谢谢你，林克。`,`「${skillNameMap[id]}」已经托付给你了。`,'去拯救塞尔达吧。']);
+  if(Object.values(quest.divineCleared).filter(Boolean).length>=4){
+    quest.stage='masterSword'; updateQuestHUD();
+    toast('四神兽已全部解放！去克洛格森林寻找大师之剑吧');
+  }
+  hideBossBar();
+  scene.remove(boss.group);
+  const idx=monsters.indexOf(boss); if(idx>=0) monsters.splice(idx,1);
+}
+let swordTrial=null;
+function startSwordTrial(){
+  if(quest.trialSwordTier>=3){ startDialog('大师之剑的台座',['剑之试炼已经全部完成。','驱魔之剑的力量已经完全苏醒。']); return; }
+  if(swordTrial){ toast('剑之试炼正在进行中'); return; }
+  const s=shrines.find(x=>x.type==='master');
+  if(!s) return;
+  swordTrial={tier:quest.trialSwordTier+1,wave:0,monsters:[],center:s.pos.clone(),started:performance.now()};
+  startDialog('剑之试炼',['把大师之剑放回台座。','试炼开始了。','击败所有幻影，证明你配得上驱魔之剑。']);
+  playTeleportFX(s.pos.clone(),0x88ddff,1.4);
+  spawnSwordTrialWave();
+}
+function spawnSwordTrialWave(){
+  if(!swordTrial) return;
+  swordTrial.wave++;
+  const c=swordTrial.center;
+  const n=swordTrial.wave===3?4:3;
+  const startIdx=monsters.length;
+  for(let i=0;i<n;i++){
+    const a=i/n*Math.PI*2+swordTrial.wave;
+    const x=c.x+Math.cos(a)*(7+swordTrial.wave*1.4), z=c.z+Math.sin(a)*(7+swordTrial.wave*1.4);
+    if(swordTrial.wave===1) spawnBokoblin(x,z,2);
+    else if(swordTrial.wave===2) spawnLizalfos(x,z,3,i===0?'fire':null);
+    else spawnMoblin(x,z,3);
+  }
+  for(let k=startIdx;k<monsters.length;k++){
+    const m=monsters[k]; m.swordTrial=true; m.aggressive=true; m.aggroRange=35;
+    swordTrial.monsters.push(m);
+  }
+  toast(`剑之试炼 · 第 ${swordTrial.wave}/3 波`);
+}
+function updateSwordTrial(dt){
+  if(!swordTrial||swordTrial.transitioning) return;
+  const alive=swordTrial.monsters.some(m=>m.state!=='dead'&&monsters.includes(m));
+  if(alive) return;
+  if(swordTrial.wave<3){
+    swordTrial.transitioning=true;
+    setTimeout(()=>{ if(swordTrial){ swordTrial.transitioning=false; spawnSwordTrialWave(); } },900);
+    return;
+  }
+  // three waves cleared
+  const tier=swordTrial.tier;
+  quest.trialSwordTier=Math.max(quest.trialSwordTier||0,tier);
+  swordTrial=null;
+  player.hp=player.maxHp; updateHearts(); updateQuestHUD(); renderJournal();
+  const ms=inventory.weapons.find(w=>w.id==='master_sword');
+  if(ms){ ms.atk=tier>=3?100:60+tier*8; ms.durability=tier>=3?Infinity:ms.dur; currentWeapon=ms; updateWeaponHUD(); }
+  SFX.champion();
+  if(tier>=3){
+    startDialog('大师之剑',['试炼完成。','驱魔之剑在你手中散发出真正的光芒。','大师之剑 · 攻击力 100。']);
+    toast('剑之试炼 · 极位完成');
+  } else {
+    startDialog('大师之剑',['这一层的试炼通过了。',`已完成 ${tier}/3 层。`,'回到台座，可以继续下一层试炼。']);
+    toast(`剑之试炼 · 第 ${tier} 层完成`);
+  }
+}
+function tryPullMasterSword(){
+  if(hasMasterSword){
+    startSwordTrial();
+    return;
+  }
+  if(player.maxHp<13){
+    startDialog('大师之剑的台座',['台座上的剑纹丝不动。',`你当前的心之容器为 ${player.maxHp} 颗。`,'需要至少 13 颗心之容器才能拔出此剑。']);
+    return;
+  }
+  hasMasterSword=true;
+  const ms=WEAPON_DEFS.find(w=>w.id==='master_sword');
+  if(ms&&!inventory.weapons.find(w=>w.id==='master_sword')) inventory.weapons.push({...ms,curDur:Infinity,qty:1});
+  currentWeapon=inventory.weapons.find(w=>w.id==='master_sword')||currentWeapon;
+  player.parts.sword.visible=true;
+  quest.masterSwordPulled=true; quest.stage='ganon'; updateQuestHUD();
+  playTeleportFX(player.pos.clone(),0xaaddff,2.0); SFX.champion();
+  startDialog('大师之剑',['你握住了剑柄。','驱魔之剑承认了你。','「大师之剑」已加入你的装备。']);
+  toast('获得大师之剑！');
+}
+const MEMORIES=[
+  {id:1,title:'灾难的预兆',text:'塞尔达公主在林克面前第一次露出脆弱的表情。她害怕自己无法唤醒封印之力。'},
+  {id:2,title:'英杰的誓言',text:'四英杰在神兽前立下誓言。米法、力巴尔、达尔克尔与乌尔波扎并肩而立。'},
+  {id:3,title:'失去的战友',text:'神兽被灾厄夺走，英杰们相继倒下。城堡上空升起赤红的光。'},
+  {id:4,title:'百年等待',text:'塞尔达独自在城堡中牵制盖侬。她的声音穿过百年，仍在呼唤林克。'},
+  {id:5,title:'最后的嘱托',text:'「林克，你一定要活下去。」塞尔达把希卡之石交到他手中。'},
+  {id:6,title:'卓拉的雨',text:'米法与林克在卓拉领地练习枪术。雨落在水面上，她的笑容温柔而坚定。'},
+  {id:7,title:'海布拉的风',text:'力巴尔在雪山上空盘旋，嘴上不肯承认林克的箭术，却悄悄替他挡下风雪。'},
+  {id:8,title:'死亡之山',text:'达尔克尔用岩石般的手掌拍着林克的肩膀，告诉他「有我在，别怕」。'},
+  {id:9,title:'格鲁德的沙',text:'乌尔波扎教塞尔达如何在风暴中站稳。她像是另一位母亲。'},
+  {id:10,title:'骑士的沉默',text:'林克被授予近卫骑士之位。他没有说话，只是握紧了剑柄。'},
+  {id:11,title:'研究所的光',text:'普尔亚在古代研究所里兴奋地展示希卡之石的新功能。'},
+  {id:12,title:'小小的心愿',text:'塞尔达偷偷把一朵静谧公主夹进研究笔记，希望林克能看见。'},
+  {id:13,title:'苏醒',text:'林克在初始台地的晨光中睁开眼睛。海拉鲁的风，已经等了他一百年。'},
+];
+const memorySpots=[];
+function makeMemorySpot(x,z,id){
+  const h=terrainHeight(x,z), g=new THREE.Group();
+  const glow=new THREE.MeshStandardMaterial({color:0xffffee,emissive:0xffffaa,emissiveIntensity:1.5,transparent:true,opacity:0.7});
+  const orb=new THREE.Mesh(new THREE.SphereGeometry(0.4,8,6),glow); orb.position.y=1.8; g.add(orb);
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(0.9,0.05,6,20),glow); ring.rotation.x=Math.PI/2; ring.position.y=1.8; g.add(ring);
+  g.position.set(x,h,z); scene.add(g);
+  memorySpots.push({group:g,pos:new THREE.Vector3(x,h,z),id,collected:false,orb});
+}
+[[-200,450],[700,600],[-800,-500],[400,-400],[100,150],[420,540],[-760,-700],[830,-560],[-760,700],[-90,-770],[-280,560],[320,-260],[-90,520]].forEach(([x,z],i)=>makeMemorySpot(x,z,i+1));
+function collectMemory(spot){
+  if(spot.collected) return;
+  spot.collected=true; quest.memoriesFound++;
+  scene.remove(spot.group);
+  if([2,4,8,12].includes(quest.memoriesFound)){
+    player.maxHp+=1; player.hp=Math.min(player.maxHp,player.hp+1);
+    buildHearts(); updateHearts(); toast('回忆之力 · 心之容器 +1');
+  }
+  openMemory(MEMORIES.find(m=>m.id===spot.id));
+  SFX.loot(); updateQuestHUD();
+}
+function openMemory(mem){
+  if(!mem) return;
+  $('memoryOverlay').style.display='flex';
+  const cv=$('memCanvas'), ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  const grd=ctx.createLinearGradient(0,0,0,H); grd.addColorStop(0,'#1a2a3a'); grd.addColorStop(1,'#0a0e14');
+  ctx.fillStyle=grd; ctx.fillRect(0,0,W,H);
+  const rg=ctx.createRadialGradient(W/2,H/2,20,W/2,H/2,300); rg.addColorStop(0,'rgba(180,220,255,.25)'); rg.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=rg; ctx.fillRect(0,0,W,H);
+  ctx.fillStyle='rgba(10,15,25,.85)';
+  ctx.beginPath(); ctx.ellipse(W/2-60,H/2+80,38,80,0,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(W/2+60,H/2+80,38,80,0,0,Math.PI*2); ctx.fill();
+  $('memText').textContent=mem.text;
+}
+$('memoryOverlay').addEventListener('click',()=>{ $('memoryOverlay').style.display='none'; });
+
+let ganon=null,ganonPhase=0,ganonHp=0;
+const GANON_MAX_HP=2000;
+function startGanonFight(){
+  if(ganonPhase>0){ toast('最终决战已在进行中'); return; }
+  if(!hasMasterSword){ startDialog('海拉鲁城堡',['城堡上空笼罩着浓重的灾厄气息。','没有大师之剑，你无法真正伤害灾厄盖侬。','先去克洛格森林取得大师之剑吧。']); return; }
+  ganonPhase=1; ganonHp=GANON_MAX_HP; SFX.bossRoar(); toast('灾厄盖侬 · 最终决战');
+  const g=new THREE.Group();
+  const bodyMat=toon(0x2a1a2a,{shadowColor:0x0a050a,steps:3,emissive:0x440044,emissiveIntensity:0.4,rimColor:0xff88cc});
+  const spikeMat=toon(0x6a2a4a,{shadowColor:0x2a0a1a,steps:3,emissive:0x882244,emissiveIntensity:0.6,rimColor:0xffaacc});
+  const core=new THREE.Mesh(new THREE.IcosahedronGeometry(3.0,2),bodyMat);
+  core.position.y=5.0; core.castShadow=true; g.add(core);
+  for(let i=0;i<8;i++){
+    const ang=(i/8)*Math.PI*2;
+    const spike=new THREE.Mesh(new THREE.ConeGeometry(0.45,3.5,5),spikeMat);
+    spike.position.set(Math.cos(ang)*4.2,5.0+Math.sin(i)*1.3,Math.sin(ang)*4.2);
+    spike.rotation.z=Math.PI/2; spike.rotation.y=-ang; g.add(spike);
+  }
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.75,10,8),
+    new THREE.MeshStandardMaterial({color:0xdd3322,emissive:0xaa1100,emissiveIntensity:2.5,roughness:0.2}));
+  head.position.set(0,5.3,3.0); g.add(head);
+  const center=new THREE.Vector3(LANDMARKS.ganon.x,terrainHeight(LANDMARKS.ganon.x,LANDMARKS.ganon.z),LANDMARKS.ganon.z-30);
+  g.position.copy(center); scene.add(g);
+  ganon={type:'ganon',group:g,core,head,pos:center.clone(),hp:GANON_MAX_HP,maxHp:GANON_MAX_HP,state:'combat',attackCD:2.5,staggerT:0,radius:3.5,damage:25,phase:1,weakPoint:'head',alertLevel:3,stealthAware:false};
+  monsters.push(ganon); updateQuestHUD();
+  registerCompendium('灾厄盖侬',{type:'BOSS',hp:2000,desc:'灾厄的化身。'});
+  showBossBar(ganon);
+}
+function damageGanon(dmg,hitPos){
+  if(!ganon||ganon.hp<=0) return;
+  ganon.hp-=dmg; ganonHp=ganon.hp;
+  emitParticles(sparkSys,hitPos.x,hitPos.y+3,hitPos.z,50,8,0.7,new THREE.Color(0xffccaa));
+  showDamageNumber(hitPos,dmg);
+  updateBossBar(ganon);
+  if(ganon.hp<=0){
+    if(ganon.phase===1){
+      ganon.phase=2; ganonPhase=2; ganon.hp=1500; ganon.maxHp=1500; ganonHp=1500;
+      SFX.divine(); toast('灾厄盖侬倒下…但灾厄并未消散。魔兽盖侬降临！');
+      ganon.group.scale.setScalar(2.5); ganon.group.position.y+=3;
+      ganon.core.material.uniforms.uEmissive.value.setHex(0x660022);
+      ganon.core.material.uniforms.uEmissiveIntensity.value=1.0;
+      ganon.core.material.uniforms.uBase.value.setHex(0x1a0a1a);
+      updateQuestHUD(); updateBossBar(ganon);
+    } else {
+      quest.ganonDefeated=true;
+  submitRecordIfBetter('ganon',1); quest.stage='end'; updateQuestHUD();
+      SFX.champion(); toast('灾厄盖侬已消灭 · 海拉鲁重归和平');
+      hideBossBar();
+      scene.remove(ganon.group);
+      const idx=monsters.indexOf(ganon); if(idx>=0) monsters.splice(idx,1);
+      ganon=null;
+      setTimeout(()=>{ startDialog('塞尔达',['你终于回来了，林克。','一百年的等待……谢谢你。','海拉鲁的和平，从今天开始。']); },1200);
+    }
+  }
+}
+const dlcCamps=[];
+let dlcSongTrial=null;
+let mazKoshia=null;
+const BOSS_ORBS=[];
+function startDLC(){
+  if(quest.dlcActive){ handleDLCReturn(); return; }
+  if(Object.values(quest.divineCleared).filter(Boolean).length<4){ startDialog('回生之祠',['神秘的力量尚未苏醒。','先解放四神兽吧。']); return; }
+  quest.dlcActive=true; quest.dlcStage=1; SFX.divine();
+  startDialog('塞尔达的呼唤',['林克……回生之祠中有新的力量。','拿起「必杀之剑」，通过四座营地的试炼。','然后，再次聆听四英杰的歌。']);
+  toast('DLC · 英杰之诗 开启');
+  player.hp=1; updateHearts();
+  const ohs={id:'one_hit_sword',name:'必杀之剑',type:'sword',atk:9999,dur:Infinity,elem:'light',desc:'DLC武器。一击必杀，但持有者生命降为1。'};
+  if(!inventory.weapons.find(w=>w.id==='one_hit_sword')) inventory.weapons.push({...ohs,curDur:Infinity,qty:1});
+  currentWeapon=inventory.weapons.find(w=>w.id==='one_hit_sword');
+  spawnDLCCamps();
+  updateQuestHUD();
+}
+function handleDLCReturn(){
+  if(!quest.dlcActive){ startDLC(); return; }
+  if(quest.mazKoshiaDefeated||quest.dlcStage>=4){
+    startDialog('回生之祠',['导师的试炼已经结束。','大师摩托 Zero 停放在祠外。','海拉鲁的风，仍在等待你的下一次出发。']);
+  } else if(quest.dlcStage===1){
+    startDialog('回生之祠',['必杀之剑的营地仍在等待。','四座营地，全部清除后回来。']);
+  } else if(quest.dlcStage===2){
+    const left=4-Object.values(quest.dlcSongs).filter(Boolean).length;
+    startDialog('回生之祠',['四英杰的歌还没有全部响起。',`还剩 ${left} 段旋律。`,'回到四神兽的身边，聆听他们的诗。']);
+  } else if(quest.dlcStage>=3){
+    startMazKoshiaFight();
+  }
+}
+function spawnDLCCamps(){
+  const gp=LANDMARKS.greatPlateau;
+  const defs=[
+    [gp.x+46,gp.z+18,'红月营地'],
+    [gp.x-48,gp.z+55,'断崖营地'],
+    [gp.x+22,gp.z-46,'遗迹营地'],
+    [gp.x-38,gp.z-54,'雪原营地'],
+  ];
+  for(let i=0;i<defs.length;i++){
+    const [x,z,name]=defs[i];
+    const h=terrainHeight(x,z);
+    const g=new THREE.Group(); g.name='dlc-camp';
+    const stone=toon(0x4a4038,{shadowColor:0x1a1410,steps:3});
+    for(let k=0;k<7;k++){
+      const a=k/7*Math.PI*2;
+      const s=new THREE.Mesh(new THREE.DodecahedronGeometry(0.35,0),stone);
+      s.position.set(Math.cos(a)*2.1,0.2,Math.sin(a)*2.1); g.add(s);
+    }
+    const beamMat=new THREE.MeshBasicMaterial({color:0xff6633,transparent:true,opacity:0.22,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});
+    const beam=new THREE.Mesh(new THREE.CylinderGeometry(0.2,1.2,17,10,1,true),beamMat);
+    beam.position.y=8.5; g.add(beam);
+    const brazier=new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.8,0.9,7),stone);
+    brazier.position.y=0.45; g.add(brazier);
+    const fire=new THREE.Mesh(new THREE.ConeGeometry(0.35,1.0,6),
+      new THREE.MeshBasicMaterial({color:0xff8833,transparent:true,opacity:0.9,blending:THREE.AdditiveBlending}));
+    fire.position.y=1.35; g.add(fire);
+    g.position.set(x,h,z); scene.add(g);
+    pushCollidable(x,z,1.0,'camp',1.2,false);
+    const camp={center:new THREE.Vector3(x,h,z),name,group:g,fire,cleared:false,monsters:[]};
+    // Respawn a compact warband for the trial.
+    const startIdx=monsters.length;
+    spawnBokoblin(x+2.4,z+0.8,3);
+    spawnBokoblin(x-1.8,z+2.2,3);
+    spawnMoblin(x-2,z-1.4,2);
+    for(let k=startIdx;k<monsters.length;k++){
+      const m=monsters[k];
+      m.dlcCamp=i; m.aggressive=true; m.aggroRange=30;
+      m.state='alert'; m.stateT=0.1;
+      camp.monsters.push(m);
+      if(m.hp<160){ m.hp=160; m.maxHp=160; }
+    }
+    dlcCamps.push(camp);
+  }
+}
+function updateDLC(dt){
+  if(!quest.dlcActive) return;
+  if(quest.dlcStage===1){
+    let cleared=0;
+    for(const c of dlcCamps){
+      if(c.cleared){ cleared++; continue; }
+      const anyAlive=c.monsters.some(m=>m.state!=='dead'&&monsters.includes(m));
+      if(!anyAlive){
+        c.cleared=true; cleared++;
+        c.fire.visible=false;
+        emitParticles(sparkSys,c.center.x,c.center.y+1,c.center.z,40,5,0.9,new THREE.Color(0xffaa66));
+        toast(`必杀之剑 · ${c.name} 净化 (${cleared}/4)`);
+        updateQuestHUD();
+      }
+    }
+    quest.dlcCampsCleared=cleared;
+    if(cleared>=4&&dlcCamps.length>=4){
+      quest.dlcStage=2;
+      // canonically the One-Hit Obliterator returns to its pedestal after the trial
+      inventory.weapons=inventory.weapons.filter(w=>w.id!=='one_hit_sword');
+      if(currentWeapon&&currentWeapon.id==='one_hit_sword') currentWeapon=inventory.weapons.find(w=>w.id==='master_sword')||inventory.weapons[0]||null;
+      player.hp=Math.max(3,Math.floor(player.maxHp*0.6)); updateHearts(); updateWeaponHUD();
+      SFX.champion();
+      startDialog('塞尔达的呼唤',['四座营地已经净化。','必杀之剑完成了它的使命。','现在，去聆听四英杰的歌吧。','回到水、火、风、雷四神兽的身边。']);
+      toast('英杰之诗 · 第二阶段：四英杰之歌');
+      updateQuestHUD();
+    }
+  } else if(quest.dlcStage===2){
+    if(dlcSongTrial){
+      const alive=dlcSongTrial.monsters.some(m=>m.state!=='dead'&&monsters.includes(m));
+      if(!alive){
+        const id=dlcSongTrial.id;
+        quest.dlcSongs[id]=true;
+        const names={water:'米法',wind:'力巴尔',fire:'达尔克尔',thunder:'乌尔波扎'};
+        startDialog(names[id]+'的诗',['旋律在风中响起。','「林克，谢谢你没有忘记我们。」','英杰的祝福又深了一分。']);
+        emitParticles(sparkSys,player.pos.x,player.pos.y+2,player.pos.z,80,7,1.2,new THREE.Color(0x88e0ff));
+        SFX.champion();
+        dlcSongTrial=null;
+        updateQuestHUD();
+        if(Object.values(quest.dlcSongs).every(Boolean)){
+          quest.dlcStage=3;
+          toast('四英杰之歌完成 · 回到回生之祠');
+          startDialog('回生之祠',['四段旋律汇聚在一起。','导师米兹·乔西亚正在祠中等待。','最后的试炼，开始了。']);
+          updateQuestHUD();
+        }
+      }
+    }
+  }
+}
+const DIVINE_ID_BY_SHRINE={'水之神兽 · 瓦·露塔':'water','风之神兽 · 瓦·梅德':'wind','火之神兽 · 瓦·鲁达尼亚':'fire','雷之神兽 · 瓦·娜波力斯':'thunder'};
+function startChampionsSongTrial(shrine){
+  const id=DIVINE_ID_BY_SHRINE[shrine.name]; if(!id) return;
+  if(quest.dlcSongs[id]){ startDialog(shrine.name,['这首英杰之歌已经完成。','旋律仍在神兽体内回响。']); return; }
+  if(dlcSongTrial){ toast('先完成当前英杰的试炼'); return; }
+  const names={water:'米法',wind:'力巴尔',fire:'达尔克尔',thunder:'乌尔波扎'};
+  startDialog(names[id]+'的诗',['幻影从神兽的阴影中现身。','击败它们，让这段旋律完整。','这是属于英杰的试炼。']);
+  const center=shrine.pos.clone();
+  const list=[];
+  const startIdx=monsters.length;
+  for(let i=0;i<3;i++){
+    const a=i/3*Math.PI*2+0.4;
+    spawnLizalfos(center.x+Math.cos(a)*5.4,center.z+Math.sin(a)*5.4,3,i===0?'thunder':null);
+  }
+  spawnBokoblin(center.x,center.z-6,4);
+  for(let k=startIdx;k<monsters.length;k++){
+    const m=monsters[k]; m.dlcSong=id; m.aggressive=true; m.aggroRange=30;
+    m.hp=Math.max(m.hp,140); m.maxHp=Math.max(m.maxHp,140); list.push(m);
+  }
+  dlcSongTrial={id,monsters:list,shrine};
+  playTeleportFX(center.clone(),0xffcc66,1.4);
+}
+function makeMazKoshiaModel(){
+  const g=new THREE.Group();
+  const robe=toon(0x7a5ab8,{shadowColor:0x2a1a50,steps:3,rimColor:0xe0c880,emissive:0x3a1a7a,emissiveIntensity:0.7});
+  const cloth=toon(0xe8d8b0,{shadowColor:0x6a5a3a,steps:3,rimColor:0xffffff});
+  const gold=toon(0xe0bc5a,{shadowColor:0x5a4018,steps:3,rimColor:0xffe9a0,emissive:0x5a3a00,emissiveIntensity:0.3});
+  const dark=toon(0x2a2420,{shadowColor:0x0a0806,steps:3});
+  const skin=toon(0xb89a78,{shadowColor:0x5a4430,steps:3});
+  const body=new THREE.Mesh(new THREE.CylinderGeometry(0.7,1.1,3.4,10),robe);
+  body.position.y=2.2; body.castShadow=true; g.add(body);
+  const skirt=new THREE.Mesh(new THREE.ConeGeometry(1.15,2.3,10,1,true),robe);
+  skirt.position.y=1.1; g.add(skirt);
+  const chest=new THREE.Mesh(new THREE.SphereGeometry(0.72,12,9),cloth);
+  chest.position.y=3.4; chest.scale.set(1.1,0.7,0.8); g.add(chest);
+  for(const s of [-1,1]){
+    const arm=new THREE.Group(); arm.position.set(s*0.75,3.25,0);
+    const upper=new THREE.Mesh(new THREE.CylinderGeometry(0.14,0.19,1.5,7),robe);
+    upper.position.y=-0.65; arm.add(upper);
+    const hand=new THREE.Mesh(new THREE.SphereGeometry(0.17,7,6),skin);
+    hand.position.y=-1.5; arm.add(hand);
+    arm.rotation.z=s*0.55; g.add(arm);
+    if(s>0) g.userData.armR=arm; else g.userData.armL=arm;
+  }
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.36,12,9),dark);
+  head.position.y=4.25; g.add(head);
+  const face=new THREE.Mesh(new THREE.SphereGeometry(0.26,9,7),skin);
+  face.position.set(0,4.18,0.16); face.scale.z=0.55; g.add(face);
+  // hat
+  const brim=new THREE.Mesh(new THREE.CylinderGeometry(0.95,1.05,0.12,12),gold);
+  brim.position.y=4.55; g.add(brim);
+  const hat=new THREE.Mesh(new THREE.ConeGeometry(0.9,1.35,12),robe);
+  hat.position.y=5.2; hat.castShadow=true; g.add(hat);
+  const eyeL=new THREE.Mesh(new THREE.SphereGeometry(0.055,6,4),new THREE.MeshBasicMaterial({color:0xffcc44}));
+  eyeL.position.set(-0.1,4.24,0.32); g.add(eyeL);
+  const eyeR=eyeL.clone(); eyeR.position.x=0.1; g.add(eyeR);
+  // ancient mandala behind him
+  const halo=new THREE.Mesh(new THREE.TorusGeometry(1.8,0.045,5,40),
+    new THREE.MeshBasicMaterial({color:0x9a7aff,transparent:true,opacity:0.65,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending}));
+  halo.position.set(0,3.6,-0.7); halo.rotation.x=0.2; g.add(halo);
+  for(let i=0;i<6;i++){
+    const rune=new THREE.Mesh(new THREE.BoxGeometry(0.12,0.5,0.04),new THREE.MeshBasicMaterial({color:0xbb99ff,transparent:true,opacity:0.65,blending:THREE.AdditiveBlending}));
+    const a=i/6*Math.PI*2;
+    rune.position.set(Math.cos(a)*1.85,3.6+Math.sin(a)*1.85,-0.68);
+    rune.rotation.z=-a; g.add(rune);
+  }
+  const light=new THREE.PointLight(0xaa88ff,2.8,18,1.8); light.position.set(0,3.5,0); g.add(light);
+  g.userData.halo=halo;
+  const baseGroup=new THREE.Group(); baseGroup.position.y=0.18; baseGroup.add(g); g.position.y=0;
+  // glowing meditation circle at the feet
+  const circleMat=new THREE.MeshBasicMaterial({color:0xbb99ff,transparent:true,opacity:0.5,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});
+  const circle=new THREE.Mesh(new THREE.RingGeometry(1.5,2.0,30),circleMat);
+  circle.rotation.x=-Math.PI/2; circle.position.y=0.05; baseGroup.add(circle);
+  for(let i=0;i<3;i++){
+    const a=i/3*Math.PI*2;
+    const orb=new THREE.Mesh(new THREE.SphereGeometry(0.16,6,5),
+      new THREE.MeshBasicMaterial({color:0xccbbff}));
+    orb.position.set(Math.cos(a)*1.7,1.3+i*0.65,Math.sin(a)*1.7); baseGroup.add(orb);
+  }
+  baseGroup.scale.setScalar(1.15);
+  g.name='maz-koshia';
+  scene.add(baseGroup);
+  return {group:baseGroup, body:g, halo};
+}
+function startMazKoshiaFight(){
+  if(mazKoshia&&mazKoshia.state!=='dead'){ toast('导师的试炼已经开始'); return; }
+  if(quest.mazKoshiaDefeated){ toast('导师的试炼已经完成'); return; }
+  const c=LANDMARKS.dlcShrine;
+  const h=terrainHeight(c.x+14,c.z+12);
+  const model=makeMazKoshiaModel();
+  model.group.position.set(c.x+14,h,c.z+12);
+  model.group.visible=true;
+  mazKoshia={type:'mazKoshia',name:'导师米兹·乔西亚',displayName:'导师米兹·乔西亚',hp:2600,maxHp:2600,group:model.group,parts:model,pos:new THREE.Vector3(c.x+14,h,c.z+12),vel:new THREE.Vector3(),radius:1.2,damage:18,state:'combat',attackCD:2.2,teleportCD:4.2,staggerT:0,animT:0,phase:0,alertLevel:3,stealthAware:true,dlcBoss:true};
+  monsters.push(mazKoshia);
+  registerCompendium('导师米兹·乔西亚',{type:'BOSS',hp:2600,desc:'英杰之诗最后的导师，操纵古老希卡术式。'});
+  showBossBar(mazKoshia); SFX.bossRoar(); toast('导师的试炼 · 米兹·乔西亚');
+  startDialog('米兹·乔西亚',['勇者的器量，让我看看吧。','英杰们的歌，是否已经传入你的剑中？']);
+  updateQuestHUD();
+}
+function spawnBossOrb(origin,target,speed,color,damage){
+  const mesh=new THREE.Mesh(new THREE.SphereGeometry(0.32,8,6),
+    new THREE.MeshBasicMaterial({color:color||0xbb88ff}));
+  mesh.position.copy(origin); scene.add(mesh);
+  const dir=target.clone().sub(origin).normalize();
+  const tail=new THREE.PointLight(color||0xbb88ff,1.6,7,2); mesh.add(tail);
+  BOSS_ORBS.push({mesh,vel:dir.multiplyScalar(speed||14),life:6,damage:damage||6,radius:0.5});
+}
+function updateBossOrbs(dt){
+  for(let i=BOSS_ORBS.length-1;i>=0;i--){
+    const o=BOSS_ORBS[i]; o.life-=dt;
+    const p=o.mesh.position, dest=p.clone().add(o.vel.clone().multiplyScalar(dt));
+    p.copy(dest);
+    if(Math.random()<dt*18) emitParticles(sparkSys,p.x,p.y,p.z,2,1.5,0.35,new THREE.Color(0xbb88ff));
+    if(p.distanceTo(player.pos.clone().add(new THREE.Vector3(0,1.2,0)))<1.5){
+      damagePlayer(o.damage,'shock');
+      emitParticles(sparkSys,p.x,p.y,p.z,20,5,0.6,new THREE.Color(0xbb88ff));
+      scene.remove(o.mesh); BOSS_ORBS.splice(i,1); continue;
+    }
+    if(p.y<terrainHeight(p.x,p.z)+0.2){
+      emitParticles(sparkSys,p.x,p.y,p.z,16,4,0.5,new THREE.Color(0xbb88ff));
+      scene.remove(o.mesh); BOSS_ORBS.splice(i,1); continue;
+    }
+    if(o.life<=0){ scene.remove(o.mesh); BOSS_ORBS.splice(i,1); }
+  }
+}
+function updateMazKoshiaAI(m,dt){
+  m.animT+=dt;
+  m.group.rotation.y=Math.atan2(player.pos.x-m.pos.x,player.pos.z-m.pos.z);
+  const to=player.pos.clone().sub(m.pos); const dist=to.length();
+  const body=m.parts.body;
+  body.position.y=0.12+Math.sin(m.animT*2.0)*0.18;
+  if(body.userData.halo){ body.userData.halo.rotation.z+=dt*0.8; body.userData.halo.material.opacity=0.4+Math.sin(m.animT*3)*0.18; }
+  if(body.userData.armL){ body.userData.armL.rotation.z=-0.55+Math.sin(m.animT*2.2)*0.12; body.userData.armR.rotation.z=0.55-Math.sin(m.animT*2.2)*0.12; }
+  if(m.staggerT>0){ m.staggerT-=dt; return; }
+  m.teleportCD-=dt;
+  m.attackCD-=dt;
+  if(m.teleportCD<=0&&dist<30){
+    m.teleportCD=rand(3.2,5.0);
+    const a=rand(0,6.28), r=rand(7,11);
+    const nx=player.pos.x+Math.cos(a)*r, nz=player.pos.z+Math.sin(a)*r;
+    const ny=terrainHeight(nx,nz);
+    emitParticles(sparkSys,m.pos.x,m.pos.y+2,m.pos.z,40,7,0.7,new THREE.Color(0xbb88ff));
+    m.pos.set(nx,ny,nz); m.group.position.copy(m.pos);
+    emitParticles(sparkSys,nx,ny+2,nz,50,8,0.8,new THREE.Color(0xbb88ff));
+    SFX.teleport&&SFX.teleport();
+  }
+  if(m.attackCD<=0){
+    if(dist<4.2){
+      m.attackCD=1.8; damagePlayer(m.damage); 
+      emitParticles(fireSys,m.pos.x,m.pos.y+2,m.pos.z,30,6,0.6,new THREE.Color(0xaa88ff));
+    } else if(dist<24){
+      m.attackCD=rand(1.5,2.3);
+      const phase2=m.hp<m.maxHp*0.5;
+      const n=phase2?5:3;
+      for(let i=0;i<n;i++){
+        setTimeout(()=>{
+          if(!mazKoshia||mazKoshia.state==='dead') return;
+          const origin=m.pos.clone().add(new THREE.Vector3(0,3.6+Math.sin(i)*0.6,0));
+          const target=player.pos.clone().add(new THREE.Vector3(rand(-1.4,1.4),1.2,rand(-1.4,1.4)));
+          spawnBossOrb(origin,target,phase2?18:13,phase2?0xff88cc:0xbb88ff);
+        },i*140);
+      }
+      SFX.rune();
+    }
+  }
+  if(m.hp<m.maxHp*0.5&&m.phase===0){
+    m.phase=1;
+    player.maxStamina=Math.min(3,player.maxStamina+0.25);
+    toast('导师的试炼 · 第二阶段');
+    emitParticles(fireSys,m.pos.x,m.pos.y+2,m.pos.z,70,10,1.0,new THREE.Color(0xaa88ff));
+  }
+  updateBossBar(m);
+}
+function damageMazKoshia(m,dmg,hitPos,isCrit){
+  if(!m||m.state==='dead') return;
+  m.hp-=dmg; showDamageNumber(hitPos.isVector3?hitPos:m.pos,dmg,isCrit);
+  emitParticles(sparkSys,m.pos.x,m.pos.y+2.2,m.pos.z,20,5,0.5,new THREE.Color(0xffeeaa));
+  SFX.hit(); m.staggerT=0.18; updateBossBar(m);
+  if(m.hp<=0) defeatMazKoshia(m);
+}
+function defeatMazKoshia(m){
+  if(m.state==='dead') return;
+  m.state='dead'; m.hp=0; quest.mazKoshiaDefeated=true; quest.dlcStage=4; quest.dlcMasterCycle=true;
+  hideBossBar(); SFX.bossRoar();
+  emitParticles(fireSys,m.pos.x,m.pos.y+2,m.pos.z,200,14,1.5,new THREE.Color(0xbb88ff));
+  emitParticles(sparkSys,m.pos.x,m.pos.y+2,m.pos.z,120,10,1.2,new THREE.Color(0xffeaa0));
+  scene.remove(m.group);
+  const idx=monsters.indexOf(m); if(idx>=0) monsters.splice(idx,1);
+  mazKoshia=null;
+  masterCycle=makeMasterCycle(LANDMARKS.dlcShrine.x+7,LANDMARKS.dlcShrine.z+4);
+  player.maxStamina=3.0;
+  updateHearts(); updateQuestHUD(); renderJournal();
+  startDialog('米兹·乔西亚',['漂亮。','你配得上英杰们的信任。','这具古代机械，就交给你了。','——大师摩托 Zero。']);
+  toast('DLC 完成 · 获得大师摩托 Zero');
+  submitRecordIfBetter('ganon',1);
+}
+function makeMasterCycle(x,z){
+  const h=terrainHeight(x,z); const g=new THREE.Group(); g.name='master-cycle';
+  const metal=toon(0x4a5060,{shadowColor:0x161a24,steps:4,rimColor:0xaaddff});
+  const glow=new THREE.MeshStandardMaterial({color:0x66ddff,emissive:0x2299dd,emissiveIntensity:2.0,roughness:0.18});
+  const body=new THREE.Mesh(new THREE.BoxGeometry(1.1,0.55,2.5),metal); body.position.y=0.65; body.castShadow=true; g.add(body);
+  const seat=new THREE.Mesh(new THREE.BoxGeometry(0.75,0.18,1.0),toon(0x1a1a22,{steps:3})); seat.position.set(0,1.0,-0.2); g.add(seat);
+  for(const zz of [-1.05,0.95]){
+    const wheel=new THREE.Mesh(new THREE.TorusGeometry(0.55,0.16,6,18),toon(0x1a1a1e,{steps:3}));
+    wheel.name='cycle-wheel';
+    wheel.position.set(0,0.55,zz); wheel.rotation.y=Math.PI/2; wheel.castShadow=true; g.add(wheel);
+    const rim=new THREE.Mesh(new THREE.TorusGeometry(0.45,0.04,4,18),glow); rim.position.set(0,0.55,zz); rim.rotation.y=Math.PI/2; g.add(rim);
+  }
+  const core=new THREE.Mesh(new THREE.IcosahedronGeometry(0.28,1),glow); core.position.set(0,0.72,0.1); g.add(core);
+  const handle=new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,0.65,5),metal); handle.rotation.z=Math.PI/2; handle.position.set(0,1.12,0.9); g.add(handle);
+  g.position.set(x,h,z); g.rotation.y=0.4; scene.add(g);
+  return {group:g,pos:new THREE.Vector3(x,h,z),name:'大师摩托 Zero',speed:0,yaw:0.4,activated:false};
+}
+let masterCycle=null, ridingCycle=false;
+function summonMasterCycle(){
+  if(!quest.dlcMasterCycle){ toast('尚未完成英杰之诗'); return; }
+  const fx=player.pos.x-Math.sin(player.yaw)*3.2;
+  const fz=player.pos.z-Math.cos(player.yaw)*3.2;
+  if(!masterCycle) masterCycle=makeMasterCycle(fx,fz);
+  masterCycle.pos.set(fx,terrainHeight(fx,fz),fz);
+  masterCycle.group.position.copy(masterCycle.pos);
+  masterCycle.group.visible=true;
+  masterCycle.yaw=player.yaw;
+  masterCycle.group.rotation.y=player.yaw;
+  playTeleportFX(masterCycle.pos.clone(),0x66ddff,1.3);
+  toast('大师摩托 Zero · 已召唤');
+}
+function mountMasterCycle(){
+  if(!masterCycle) return;
+  ridingCycle=true;
+  masterCycle.speed=0;
+  player.group.visible=false;
+  player.vel.set(0,0,0);
+  if(document.pointerLockElement){ /* stay locked */ }
+  toast('大师摩托 Zero · W加速 / Shift推进 / A·D转向 / E下车');
+}
+function dismountMasterCycle(){
+  ridingCycle=false;
+  player.group.visible=true;
+  const side=Math.cos(masterCycle.yaw)*1.4;
+  const fwd=Math.sin(masterCycle.yaw);
+  player.pos.set(masterCycle.pos.x+side,masterCycle.pos.y+0.1,masterCycle.pos.z+fwd*0.4);
+  player.pos.y=terrainHeight(player.pos.x,player.pos.z)+0.05;
+  player.group.position.copy(player.pos);
+  player.yaw=masterCycle.yaw;
+  toast('下车 · 大师摩托 Zero');
+}
+function updateCycleRiding(dt){
+  if(!masterCycle){ ridingCycle=false; player.group.visible=true; return; }
+  const accel=(keys['KeyW']?22:0)+(keys['KeyS']?-9:0);
+  const boost=keys['ShiftLeft']?1.55:1;
+  const maxSpeed=keys['ShiftLeft']?24:13;
+  masterCycle.speed=clamp(masterCycle.speed+accel*dt, -5, maxSpeed);
+  if(!keys['KeyW']&&!keys['KeyS']) masterCycle.speed*=Math.pow(0.58,dt);
+  const turn=(keys['KeyD']?1:0)-(keys['KeyA']?1:0);
+  if(Math.abs(masterCycle.speed)>0.2) masterCycle.yaw-=turn*dt*(1.5+Math.abs(masterCycle.speed)*0.07);
+  const fx=Math.sin(masterCycle.yaw), fz=Math.cos(masterCycle.yaw);
+  const nx=clamp(masterCycle.pos.x+fx*masterCycle.speed*dt,-HALF_X+30,HALF_X-30);
+  const nz=clamp(masterCycle.pos.z+fz*masterCycle.speed*dt,-HALF_Z+30,HALF_Z-30);
+  if(terrainSlope(nx,nz)<1.8){ masterCycle.pos.x=nx; masterCycle.pos.z=nz; }
+  else masterCycle.speed*=0.4;
+  masterCycle.pos.y=terrainHeight(masterCycle.pos.x,masterCycle.pos.z);
+  masterCycle.group.position.copy(masterCycle.pos);
+  masterCycle.group.position.y+=0.05;
+  masterCycle.group.rotation.y=masterCycle.yaw;
+  masterCycle.group.rotation.z=clamp(-turn*(1-Math.min(1,Math.abs(masterCycle.speed)/16)),-0.25,0.25);
+  const wheelSpin=masterCycle.speed*dt*2.2;
+  masterCycle.group.traverse(o=>{ if(o.name==='cycle-wheel') o.rotation.x+=wheelSpin; });
+  player.pos.copy(masterCycle.pos); player.pos.y+=0.55;
+  player.onGround=true; player.vel.set(0,0,0);
+  if(Math.abs(masterCycle.speed)>5&&Math.random()<dt*16){
+    const px=masterCycle.pos.x-fx*1.2+rand(-0.3,0.3), pz=masterCycle.pos.z-fz*1.2+rand(-0.3,0.3);
+    emitParticles(waterSys,px,terrainHeight(px,pz)+0.25,pz,2,2.5,0.45,new THREE.Color(0x9aa88a));
+  }
+  if(keys['Space']){ masterCycle.speed*=Math.pow(0.05,dt); }
+  updateInteractHint();
+  updateStaminaHUD();
+}
+function showBossBar(boss){
+  $('bossHud').style.display='block';
+  $('bossName').textContent=boss.name||'灾厄盖侬';
+  updateBossBar(boss);
+}
+function updateBossBar(boss){
+  $('bossBarFill').style.width=clamp((boss.hp/boss.maxHp)*100,0,100)+'%';
+}
+function hideBossBar(){ $('bossHud').style.display='none'; }
+
+// ============================================================
+// 烹饪 / 背包 / 图鉴
+// ============================================================
+let cookSlots=[]; const COOK_SLOT_COUNT=5; let cookOpen=false;
+function openCook(){
+  if(dialogActive||mapOpen||invOpen||player.state==='dead') return;
+  cookSlots=[]; $('cookOverlay').style.display='flex'; renderCookUI(); cookOpen=true;
+  if(document.pointerLockElement) document.exitPointerLock();
+}
+function closeCook(){ $('cookOverlay').style.display='none'; cookOpen=false; }
+function renderCookUI(){
+  const slotsEl=$('cookSlots'); slotsEl.innerHTML='';
+  for(let i=0;i<COOK_SLOT_COUNT;i++){
+    const d=document.createElement('div'); d.className='cook-slot'+(cookSlots[i]?' filled':'');
+    d.textContent=cookSlots[i]?cookSlots[i].name:'空';
+    d.addEventListener('click',()=>{ if(cookSlots[i]){ cookSlots.splice(i,1); renderCookUI(); } });
+    slotsEl.appendChild(d);
+  }
+  const matsEl=$('cookMats'); matsEl.innerHTML='';
+  inventory.materials.filter(m=>m.qty>0).forEach(m=>{
+    const d=document.createElement('div'); d.className='cook-mat'; d.textContent=`${m.name} ×${m.qty}`;
+    d.addEventListener('click',()=>{ if(cookSlots.length>=COOK_SLOT_COUNT){ toast('锅已满'); return; } if(m.qty<=0) return; cookSlots.push(m); m.qty--; renderCookUI(); });
+    matsEl.appendChild(d);
+  });
+  $('cookBtn').disabled=cookSlots.length===0;
+}
+function doCook(){
+  if(cookSlots.length===0) return;
+  let hpVal=0,heartVal=0,staminaVal=0,dur=0;
+  const effMap={};
+  const foodEffMap={atk:'atk',def:'def',spd:'spd',stealth:'stealth',cold:'cold',heat:'heat',shock:'shock'};
+  cookSlots.forEach(m=>{
+    if(m.eff==='hp') hpVal+=m.val||1;
+    else if(m.eff==='heart') heartVal+=m.val||1;
+    else if(m.eff==='stamina') staminaVal+=m.val||0.5;
+    else if(foodEffMap[m.eff]) effMap[m.eff]=(effMap[m.eff]||0)+(m.val||1);
+    dur+=m.dur||30;
+  });
+  let eff=null,effVal=0;
+  const keys=Object.keys(effMap);
+  if(keys.length>0){ eff=keys[0]; effVal=Math.min(3,effMap[eff]); }
+  dur=Math.min(dur,1800);
+  const name=generateFoodName(cookSlots,eff);
+  const food={id:'food_'+Date.now(),name,eff:eff||(heartVal>0?'heart':'hp'),val:effVal||heartVal,dur,hp:hpVal,heart:heartVal,stamina:staminaVal};
+  inventory.food.push(food); SFX.cook();
+  quest.cookedCount=(quest.cookedCount||0)+1;
+  const effNames={atk:'攻击',def:'防御',spd:'速度',stealth:'潜行',cold:'耐寒',heat:'耐热',shock:'抗电'};
+  let html=`<span style="color:#8f8">烹饪成功！</span><br>「${name}」<br>`;
+  if(eff) html+=`${effNames[eff]||eff} Lv${effVal} `;
+  if(heartVal>0) html+=`额外黄心 +${heartVal} `;
+  if(hpVal>0) html+=`回复 ${hpVal} 心 `;
+  if(staminaVal>0) html+=`精力 +${staminaVal}圈 `;
+  if(dur>0) html+=`${Math.floor(dur/60)}分${dur%60}秒`;
+  $('cookResult').innerHTML=html;
+  cookSlots=[]; renderCookUI();
+}
+function generateFoodName(slots,eff){
+  const prefixMap={atk:'大剑',def:'坚硬',spd:'速速',stealth:'潜行',cold:'暖暖',heat:'冰冷',shock:'酥麻'};
+  const first=slots[0]?slots[0].name:'料理';
+  const prefix=prefixMap[eff]||(slots.some(m=>m.eff==='heart')?'生命':slots.some(m=>m.eff==='stamina')?'精力':'海鲜');
+  return prefix+first.slice(0,2)+'料理';
+}
+function eatFood(food){
+  if(food.hp) player.hp=Math.min(player.maxHp,player.hp+food.hp);
+  if(food.heart) player.hp=Math.min(player.maxHp+food.heart,player.hp+food.heart);
+  if(food.stamina) player.stamina=Math.min(player.maxStamina,player.stamina+food.stamina*0.2);
+  if(food.eff==='atk'){ player.buffLevels.atk=food.val; player.atkBuff=food.dur; }
+  else if(food.eff==='def'){ player.buffLevels.def=food.val; player.defBuff=food.dur; }
+  else if(food.eff==='spd'){ player.buffLevels.spd=food.val; player.speedBuff=food.dur; }
+  else if(food.eff==='stealth'){ player.stealthBuff=food.dur; }
+  else if(food.eff==='cold'){ player.cold=-food.dur; }
+  else if(food.eff==='heat'){ player.heat=-food.dur; }
+  updateHearts(); toast(`食用「${food.name}」`); SFX.loot();
+}
+
+let invOpen=false,invTab='armor',invSelected=null;
+const INV_TABS=[['armor','服装'],['sword','单手剑'],['greatsword','双手剑'],['spear','长枪'],['shields','盾牌'],['bows','弓'],['materials','材料'],['monster','怪物素材'],['food','料理']];
+function openInventory(){
+  if(dialogActive||mapOpen||cookOpen||player.state==='dead') return;
+  invOpen=true; $('invOverlay').style.display='flex'; renderInvTabs(); renderInvList(); renderInvDetail(null);
+  if(document.pointerLockElement) document.exitPointerLock();
+}
+function closeInventory(){ invOpen=false; $('invOverlay').style.display='none'; }
+function renderInvTabs(){
+  const el=$('invTabs'); el.innerHTML='';
+  INV_TABS.forEach(([id,label])=>{
+    const d=document.createElement('div'); d.className='inv-tab'+(invTab===id?' active':''); d.textContent=label;
+    d.addEventListener('click',()=>{ invTab=id; invSelected=null; renderInvTabs(); renderInvList(); renderInvDetail(null); });
+    el.appendChild(d);
+  });
+}
+function getInvItems(){
+  if(invTab==='sword') return inventory.weapons.filter(w=>w.type==='sword');
+  if(invTab==='greatsword') return inventory.weapons.filter(w=>w.type==='greatsword');
+  if(invTab==='spear') return inventory.weapons.filter(w=>w.type==='spear');
+  if(invTab==='shields') return inventory.shields;
+  if(invTab==='bows') return inventory.bows;
+  if(invTab==='materials') return inventory.materials.filter(m=>!m.monster&&m.qty>0);
+  if(invTab==='monster') return inventory.materials.filter(m=>m.monster&&m.qty>0);
+  if(invTab==='food') return inventory.food;
+  if(invTab==='armor') return inventory.armors;
+  return [];
+}
+function renderInvList(){
+  const list=$('invList'); list.innerHTML='';
+  const items=getInvItems();
+  items.forEach(item=>{
+    const d=document.createElement('div');
+    const equipped=(item===currentWeapon)||(item===currentShield)||(item===currentBow)||(item.kind==='armor'&&currentArmor&&item.id===currentArmor.id);
+    d.className='inv-item'+(equipped?' equipped':'')+(invSelected===item?' selected':'');
+    let sub='';
+    if(item.kind==='armor') sub=`防御 ${item.def} · ${item.effect||'—'}`;
+    else if(item.atk!==undefined) sub=`攻击 ${item.atk} · 耐久 ${isFinite(item.dur)?Math.ceil(item.curDur)+'/'+item.dur:'∞'}`;
+    else if(item.def!==undefined) sub=`防御 ${item.def} · 耐久 ${Math.ceil(item.curDur)}/${item.dur}`;
+    else if(item.qty!==undefined) sub=`×${item.qty}`;
+    else if(item.eff) sub=`${({hp:'回复',heart:'黄心',stamina:'精力',atk:'攻击',def:'防御',spd:'速度',stealth:'潜行',cold:'耐寒',heat:'耐热',shock:'抗电'})[item.eff]||item.eff} ${item.val||''}`;
+    d.innerHTML=`<div class="ii-name">${item.name}</div><div class="ii-sub">${sub}</div>`;
+    d.addEventListener('click',()=>{ invSelected=item; renderInvList(); renderInvDetail(item); });
+    list.appendChild(d);
+  });
+  if(items.length===0) list.innerHTML='<div style="grid-column:1/-1;text-align:center;color:rgba(160,180,200,.4);padding:30px;font-size:11px;">此分类暂无物品</div>';
+}
+function renderInvDetail(item){
+  const el=$('invDetail');
+  if(!item){ el.innerHTML='<div style="color:rgba(160,180,200,.4);text-align:center;padding-top:40px;font-size:11px;">选择一件物品</div>'; return; }
+  let html=`<div class="id-name">${item.name}</div>`;
+  if(item.kind==='armor'){
+    html+=`<span class="id-tag">防御 ${item.def}</span><span class="id-tag" style="color:#9fe8c0">${item.effect||'—'}</span>`;
+    (item.pieces||[]).forEach(p=>{ html+=`<span class="id-tag">${p}</span>`; });
+  } else {
+    if(item.atk!==undefined) html+=`<span class="id-tag">攻击 ${item.atk}</span><span class="id-tag">耐久 ${isFinite(item.dur)?Math.ceil(item.curDur)+'/'+item.dur:'∞'}</span>`;
+    if(item.def!==undefined) html+=`<span class="id-tag">防御 ${item.def}</span><span class="id-tag">耐久 ${Math.ceil(item.curDur)}/${item.dur}</span>`;
+    if(item.elem) html+=`<span class="id-tag" style="color:#ffcc88">${ELEM_INFO[item.elem]?.name||''}属性</span>`;
+    if(item.qty!==undefined) html+=`<span class="id-tag">×${item.qty}</span>`;
+  }
+  html+=`<div class="id-desc">${item.desc||(item.monster?'怪物掉落的素材。':'—')}</div>`;
+  if(item.kind==='armor') html+=`<div class="id-btn" id="equipBtn">${currentArmor&&currentArmor.id===item.id?'已穿着':'换上'}</div>`;
+  else if(item.atk!==undefined||item.def!==undefined||item.type==='bow') html+=`<div class="id-btn" id="equipBtn">装备</div>`;
+  else if(invTab==='food') html+=`<div class="id-btn" id="eatBtn">食用</div>`;
+  el.innerHTML=html;
+  const eq=$('equipBtn');
+  if(eq) eq.addEventListener('click',()=>{
+    if(item.kind==='armor'){ applyArmor(item.id); renderInvList(); renderInvDetail(item); return; }
+    if(item.atk!==undefined&&item.type!=='bow') currentWeapon=item;
+    else if(item.def!==undefined) currentShield=item;
+    else if(item.type==='bow') currentBow=item;
+    updateWeaponHUD(); renderInvList(); toast('已装备 '+item.name);
+  });
+  const eat=$('eatBtn');
+  if(eat) eat.addEventListener('click',()=>{
+    eatFood(item); inventory.food=inventory.food.filter(f=>f!==item);
+    invSelected=null; renderInvList(); renderInvDetail(null);
+  });
+}
+function openCompendium(){
+  if(dialogActive||mapOpen||invOpen||player.state==='dead') return;
+  $('compOverlay').style.display='flex'; renderCompendium();
+  if(document.pointerLockElement) document.exitPointerLock();
+}
+function closeCompendium(){ $('compOverlay').style.display='none'; }
+function renderCompendium(){
+  const grid=$('compGrid'); grid.innerHTML='';
+  Object.values(monsterCompendium).forEach(entry=>{
+    const d=document.createElement('div'); d.className='comp-entry';
+    d.innerHTML=`<div class="ce-name">${entry.name}</div><div class="ce-meta">${entry.type} · HP ${entry.hp||'?'}</div><div class="ce-meta">${entry.desc||''}</div>`;
+    grid.appendChild(d);
+  });
+  if(Object.keys(monsterCompendium).length===0) grid.innerHTML='<div style="text-align:center;color:rgba(160,180,200,.4);padding:30px;">尚未遇到任何魔物</div>';
+}
+
+// ============================================================
+// ★ 冒险日志（主线 / DLC / 全部神庙 / 首领 / 挑战）
+// ============================================================
+const JAD=window.BOTW_ADVENTURE_DATA||{main:[],dlc:[],bosses:[],challenges:[],shrines:[],dlcShrines:[]};
+const SIDE_QUESTS=[
+  {id:'misko',title:'米斯科的宝藏',en:"Misko's Treasure",summary:'海拉鲁的传说中，有一位收藏家把宝物藏在了荒野的洞穴里。',objective:'打开任意一个宝箱。',test:()=>chests.some(c=>c.opened)},
+  {id:'gems',title:'宝石收藏家',en:'A Rare Find',summary:'格鲁德的宝石商人对海拉鲁的矿石很感兴趣。',objective:'收集 8 块矿石或宝石。',test:()=>inventory.materials.filter(m=>['amber','opal','luminous_stone','ruby','sapphire','topaz','diamond'].includes(m.id)).reduce((a,m)=>a+m.qty,0)>=8,progress:()=>[inventory.materials.filter(m=>['amber','opal','luminous_stone','ruby','sapphire','topaz','diamond'].includes(m.id)).reduce((a,m)=>a+m.qty,0),8]},
+  {id:'cook',title:'今天的晚餐',en:"Today's Menu",summary:'营火旁的锅已经热了。任何旅行者都应该学会用海拉鲁的食材填饱肚子。',objective:'完成 3 次烹饪。',test:()=>quest.cookedCount>=3,progress:()=>[quest.cookedCount,3]},
+  {id:'korok',title:'森林的恶作剧',en:"The Forest's Prank",summary:'藏在石头下、树梢上的呀哈哈，正等着有人发现它们。',objective:'找到 5 个克洛格。',test:()=>player.korokSeeds>=5,progress:()=>[player.korokSeeds,5]},
+  {id:'shrine',title:'试炼的邀请',en:'An Invitation to Trials',summary:'希卡之石记录了海拉鲁各地的试炼。通过它们，你才能与灾厄对抗。',objective:'通过 4 座神庙的试炼。',test:()=>player.trialPass>=4,progress:()=>[Math.min(player.trialPass,4),4]},
+  {id:'tower',title:'测绘海拉鲁',en:'Mapping Hyrule',summary:'启动一座希卡塔，让希卡之石获得这片土地的高度与道路。',objective:'启动任意一座希卡塔。',test:()=>towers.some(t=>t.activated)},
+  {id:'horse',title:'旅人的伙伴',en:'A Traveler’s Companion',summary:'一匹好马能让旅程缩短一半，也能在危险时带你离开。',objective:'骑乘一匹马或大师摩托。',test:()=>!!quest.horseMounted||!!quest.dlcMasterCycle},
+  {id:'weapons',title:'武器鉴定家',en:'The Weapon Connoisseur',summary:'海拉鲁的武器各有性格。旅行者应该多尝试不同的武器。',objective:'在背包中收集 8 件不同的武器。',test:()=>inventory.weapons.length>=8,progress:()=>[inventory.weapons.length,8]},
+  {id:'memory',title:'照片中的风景',en:'Captured Memories',summary:'希卡之石里的十二张照片，记录着林克遗忘的过去。',objective:'找回 1 段失去的记忆。',test:()=>quest.memoriesFound>=1},
+  {id:'master',title:'驱魔之剑',en:'The Master Sword',summary:'只有拥有足够心之容器的勇者，才能拔起森林中的驱魔之剑。',objective:'获得大师之剑。',test:()=>hasMasterSword},
+  {id:'beyond',title:'越过海拉鲁',en:'Beyond Hyrule',summary:'找到一艘船、一道光，或者一段不属于这个时代的故事。',objective:'完成英杰之诗并取得大师摩托 Zero。',test:()=>quest.dlcMasterCycle},
+  {id:'allstar',title:'四英杰的回忆',en:'Champions of Hyrule',summary:'当四神兽重归寂静，英杰们的灵魂也终于可以安息。',objective:'解放全部四神兽。',test:()=>Object.values(quest.divineCleared).every(Boolean),progress:()=>[Object.values(quest.divineCleared).filter(Boolean).length,4]},
+];
+let journalOpen=false, journalTab='main', journalSel=null, journalSelId=null;
+const JOURNAL_ACTS={0:'序章',1:'第一幕',2:'第二幕',3:'第三幕',4:'终章'};
+function virtualShrineCompleted(i){ return (quest.virtualShrines||[]).includes(i); }
+function seenNpc(name){ return npcs.some(n=>n.name===name&&n.talked); }
+function mainQuestState(q){
+  const stageRank={tutorial:0,divine:1,masterSword:2,ganon:3,end:4};
+  const rank=stageRank[quest.stage]!==undefined?stageRank[quest.stage]:0;
+  const divineN=Object.values(quest.divineCleared).filter(Boolean).length;
+  const doneMap={
+    awakening: player.trialPass>=3||rank>=1,
+    seek_impa: seenNpc('英帕'),
+    locked_mementos: seenNpc('普尔亚'),
+    zora_domain: quest.divineCleared.water,
+    vah_ruta: quest.divineCleared.water,
+    goron_city: quest.divineCleared.fire,
+    vah_rudania: quest.divineCleared.fire,
+    rito_village: quest.divineCleared.wind,
+    vah_medoh: quest.divineCleared.wind,
+    gerudo_town: quest.divineCleared.thunder,
+    vah_naboris: quest.divineCleared.thunder,
+    captured_memories: quest.memoriesFound>=quest.totalMemories,
+    master_sword: hasMasterSword,
+    destroy_ganon: quest.ganonDefeated,
+  };
+  if(doneMap[q.id]) return 'done';
+  if(q.id==='awakening') return rank<=1?'active':'done';
+  if(q.id==='seek_impa') return rank>=1?'active':'locked';
+  if(q.id==='locked_mementos') return (rank>=1&&seenNpc('英帕'))?'active':'locked';
+  if(['zora_domain','vah_ruta','goron_city','vah_rudania','rito_village','vah_medoh','gerudo_town','vah_naboris'].includes(q.id)) return rank>=1?'active':'locked';
+  if(q.id==='captured_memories') return rank>=1?'active':'locked';
+  if(q.id==='master_sword') return (rank>=2||divineN>=4)?'active':'locked';
+  if(q.id==='destroy_ganon') return rank>=3?'active':'locked';
+  return 'locked';
+}
+function dlcQuestState(q){
+  const divineN=Object.values(quest.divineCleared).filter(Boolean).length;
+  if(q.id==='trial_sword') return quest.trialSwordTier>=3?'done':(hasMasterSword?'active':'locked');
+  if(q.id==='champions_ballad') return quest.dlcMasterCycle?'done':(divineN>=4?'active':'locked');
+  if(q.id==='mipha_song') return quest.dlcSongs.water?'done':(quest.dlcActive&&quest.dlcStage>=2?'active':'locked');
+  if(q.id==='revali_song') return quest.dlcSongs.wind?'done':(quest.dlcActive&&quest.dlcStage>=2?'active':'locked');
+  if(q.id==='daruk_song') return quest.dlcSongs.fire?'done':(quest.dlcActive&&quest.dlcStage>=2?'active':'locked');
+  if(q.id==='urbosa_song') return quest.dlcSongs.thunder?'done':(quest.dlcActive&&quest.dlcStage>=2?'active':'locked');
+  if(q.id==='divine_trial') return quest.mazKoshiaDefeated?'done':(Object.values(quest.dlcSongs).every(Boolean)?'active':'locked');
+  if(q.id==='master_cycle') return quest.dlcMasterCycle?'done':'locked';
+  return 'locked';
+}
+function bossJournalState(b){
+  const map={
+    waterblight:quest.divineCleared.water,
+    fireblight:quest.divineCleared.fire,
+    windblight:quest.divineCleared.wind,
+    thunderblight:quest.divineCleared.thunder,
+    calamity:quest.ganonDefeated,
+    darkbeast:quest.ganonDefeated,
+    mazkoshia:quest.mazKoshiaDefeated,
+    kohga:!!quest.kohgaDefeated,
+  };
+  if(map[b.id]!==undefined) return map[b.id]?'done':(b.id==='mazkoshia'&&!quest.dlcActive?'locked':(b.id==='calamity'||b.id==='darkbeast'?(quest.stage==='ganon'?'active':'locked'):'unseen'));
+  const names={guardian:'守护者',skywatcher:'飞行守护者',lynel:'莱尼尔',talus:'岩石巨人',hinox:'西诺克斯',molduga:'莫尔德拉吉克',yiga:'依盖队'};
+  const key=names[b.id];
+  if(key&&Object.keys(monsterCompendium).some(k=>k.includes(key)||key.includes(k))) return 'seen';
+  return 'unseen';
+}
+function getChallengeValue(c){
+  switch(c.id){
+    case 'divine_beasts': return [Object.values(quest.divineCleared).filter(Boolean).length,c.target];
+    case 'shrines': return [Math.min(c.target,shrines.filter(s=>s.challengeCleared).length+quest.virtualShrines.length),c.target];
+    case 'towers': return [towers.filter(t=>t.activated).length,Math.max(1,towers.length)];
+    case 'koroks': return [player.korokSeeds,c.target];
+    case 'memories': return [quest.memoriesFound,quest.totalMemories];
+    case 'bosses': return [Object.keys(monsterCompendium).filter(k=>/咒|盖侬|守护者|莱尼尔|巨人|西诺克斯|莫尔德拉吉克/.test(k)).length,c.target];
+    case 'trial_sword': return [quest.trialSwordTier||0,c.target];
+    case 'champions_ballad': return [Object.values(quest.dlcSongs).filter(Boolean).length,c.target];
+    case 'master_cycle': return [quest.dlcMasterCycle?1:0,c.target];
+    case 'cooking': return [Math.min(c.target,quest.cookedCount||0),c.target];
+    case 'collectibles': return [Math.min(c.target,(inventory.materials||[]).filter(m=>['amber','opal','luminous_stone','guardian_gear'].includes(m.id)).reduce((a,m)=>a+(m.qty||0),0)),c.target];
+    case 'ganon': return [quest.ganonDefeated?1:0,c.target];
+    default: return [0,c.target];
+  }
+}
+function openJournal(){
+  if(dialogActive||mapOpen||invOpen||cookOpen||journalOpen||player.state==='dead'
+    ||$('shrineOverlay').style.display==='flex'||$('compOverlay').style.display==='flex'||$('memoryOverlay').style.display==='flex') return;
+  if(document.pointerLockElement) document.exitPointerLock();
+  journalOpen=true; journalTab='main'; journalSel=null; journalSelId=null;
+  $('journalOverlay').style.display='flex';
+  renderJournal();
+  SFX.rune();
+}
+function closeJournal(){
+  journalOpen=false;
+  $('journalOverlay').style.display='none';
+}
+function setJournalTab(tab){
+  journalTab=tab; journalSel=null; journalSelId=null;
+  [...$('journalTabs').children].forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
+  renderJournal();
+}
+function renderJournal(){
+  const mainDone=JAD.main.filter(q=>mainQuestState(q)==='done').length;
+  const shrineDone=shrines.filter(s=>s.challengeCleared).length+quest.virtualShrines.length;
+  const sideDone=SIDE_QUESTS.filter(q=>{try{return q.test();}catch(e){return false;}}).length;
+  $('journalProgress').innerHTML=`主线 ${mainDone}/${JAD.main.length} · 支线 ${sideDone}/${SIDE_QUESTS.length} · 神庙 ${shrineDone}/${JAD.shrines.length} · 灵魂宝珠 ${quest.spiritOrbs||0}`;
+  const body=$('journalBody');
+  if(journalTab==='shrines'){ renderJournalShrines(); return; }
+  if(journalTab==='challenges'){ renderJournalChallenges(); return; }
+  body.classList.remove('wide');
+  $('journalList').style.display='';
+  $('journalDetail').style.display='';
+  const list=$('journalList');
+  list.innerHTML='';
+  let items=[];
+  if(journalTab==='main') items=JAD.main.map(q=>({...q,sec:'main',state:mainQuestState(q)}));
+  if(journalTab==='dlc') items=JAD.dlc.map(q=>({...q,sec:'dlc',state:dlcQuestState(q)}));
+  if(journalTab==='side') items=SIDE_QUESTS.map(q=>({...q,sec:'side',state:q.test()?'done':'active'}));
+  if(journalTab==='bosses') items=JAD.bosses.map(b=>({...b,sec:'boss',state:bossJournalState(b)}));
+  journalSel=items.find(i=>(i.id||i.name)===journalSelId)||items[0]||null;
+  if(journalSel) journalSelId=journalSel.id||journalSel.name;
+  items.forEach(item=>{
+    const d=document.createElement('div');
+    const state=item.state;
+    const active=journalSel===item;
+    d.className='jq'+(active?' active':'')
+      +(state==='done'?' done':'')
+      +(journalTab==='bosses'?' boss':'')
+      +(state==='locked'?' locked':'');
+    d.innerHTML=`<div class="jq-kicker">${journalTab==='bosses'?item.type:(journalTab==='side'?'支线任务':(JOURNAL_ACTS[item.act]||''))}</div>
+      <div class="jq-title">${escapeHtml(item.title||item.name)}</div>
+      <div class="jq-en">${escapeHtml(item.en||'')}</div>
+      <div class="jq-state">${state==='done'?'完成':state==='active'?'进行中':state==='seen'?'已记录':state==='unseen'?'未遭遇':'未解锁'}</div>`;
+    d.addEventListener('click',()=>{ journalSel=item; journalSelId=item.id||item.name; renderJournal(); });
+    list.appendChild(d);
+  });
+  renderJournalDetail(journalSel);
+}
+function renderJournalDetail(item){
+  const el=$('journalDetail');
+  if(!item){ el.innerHTML='<div style="color:rgba(170,190,190,.35);padding:40px 0;font-size:11px;">选择左侧条目</div>'; return; }
+  if(item.sec==='side'){
+    const st=item.test()?'done':'active';
+    const prog=item.progress?item.progress():null;
+    el.innerHTML=`<div class="jd-act">支线任务 · SIDE QUEST</div>
+      <div class="jd-title">${escapeHtml(item.title)}</div>
+      <div class="jd-en">${escapeHtml(item.en||'')}</div>
+      <div class="jd-rule"></div>
+      <div class="jd-summary">${escapeHtml(item.summary)}</div>
+      <div class="jd-label">任务目标</div>
+      <div class="jd-objective">${escapeHtml(item.objective)}</div>
+      <div class="jd-meta"><span class="jd-chip">${st==='done'?'已完成':'进行中'}</span>${prog?`<span class="jd-chip">${prog[0]}/${prog[1]}</span>`:''}</div>
+      ${st==='done'?'<div class="jd-btn" style="opacity:.65;cursor:default;">已完成</div>':''}`;
+    return;
+  }
+  if(item.sec==='boss'){
+    const st=bossJournalState(item);
+    el.innerHTML=`<div class="jd-act">${escapeHtml(item.type)}</div>
+      <div class="jd-title">${escapeHtml(item.name)}</div>
+      <div class="jd-en">${escapeHtml(item.en)}</div>
+      <div class="jd-rule"></div>
+      <div class="jd-summary">${escapeHtml(item.desc)}</div>
+      <div class="jd-label">出没地点</div>
+      <div class="jd-objective">${escapeHtml(item.where)}</div>
+      <div class="jd-meta"><span class="jd-chip">${st==='done'?'已击败':st==='seen'?'图鉴已记录':st==='active'?'交战中':'尚未遭遇'}</span></div>`;
+    return;
+  }
+  const st=item.sec==='main'?mainQuestState(item):dlcQuestState(item);
+  el.innerHTML=`<div class="jd-act">${item.sec==='main'?'主线任务':'DLC 剧情'} · ${JOURNAL_ACTS[item.act]||''}</div>
+    <div class="jd-title">${escapeHtml(item.title)}</div>
+    <div class="jd-en">${escapeHtml(item.en)}</div>
+    <div class="jd-rule"></div>
+    <div class="jd-summary">${escapeHtml(item.summary)}</div>
+    <div class="jd-label">当前目标</div>
+    <div class="jd-objective">${escapeHtml(item.objective)}</div>
+    <div class="jd-meta"><span class="jd-chip">${st==='done'?'已完成':st==='active'?'进行中':'未解锁'}</span><span class="jd-chip">${escapeHtml(item.objective)}</span></div>`;
+}
+function renderJournalShrines(){
+  const body=$('journalBody');
+  body.classList.add('wide');
+  $('journalList').style.display='none';
+  const el=$('journalDetail'); el.style.display='block';
+  const totalBase=JAD.shrines.length;
+  const all=[...JAD.shrines.map((s,i)=>({...s,idx:i,dlc:false})),...JAD.dlcShrines.map((s,i)=>({...s,idx:totalBase+i,dlc:true}))];
+  el.innerHTML=`<div style="display:flex;align-items:baseline;gap:16px;margin-bottom:10px;flex-wrap:wrap;">
+    <div style="font-size:17px;letter-spacing:4px;color:#e8d6a8;">试炼之祠档案</div>
+    <div style="font-size:10px;color:rgba(180,200,195,.5);">基础 ${totalBase} 座 · DLC ${JAD.dlcShrines.length} 座 · 已完成 ${shrines.filter(s=>s.challengeCleared).length+quest.virtualShrines.length} 座</div>
+  </div>
+  <div style="font-size:10px;color:rgba(170,195,190,.42);line-height:1.8;margin-bottom:6px;">世界中共有 11 座实体神庙可步行抵达。未在地图上出现的神庙可通过希卡之石的「试炼投影」进行挑战——每完成一次投影试炼获得 1 枚灵魂宝珠。</div>
+  <div class="journal-grid">${all.map(s=>{
+    const done=virtualShrineCompleted(s.idx);
+    return `<div class="js-card${done?' done':''}${s.dlc?' dlc':''}">
+      <div class="js-name">${escapeHtml(s.name)}</div>
+      <div class="js-trial">${escapeHtml(s.trial||'')}</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:5px;">
+        <span style="font-size:8px;color:rgba(180,200,190,.4);">${done?'已完成':'未探索'}</span>
+        <button ${done?'disabled':''} data-shrine="${s.idx}">${done?'✓':'投影试炼'}</button>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
+  el.querySelectorAll('button[data-shrine]').forEach(btn=>{
+    btn.addEventListener('click',e=>{ e.stopPropagation(); startVirtualShrine(Number(btn.dataset.shrine)); });
+  });
+}
+function renderJournalChallenges(){
+  const body=$('journalBody');
+  body.classList.add('wide');
+  $('journalList').style.display='none';
+  const el=$('journalDetail'); el.style.display='block';
+  el.innerHTML=`<div style="font-size:17px;letter-spacing:4px;color:#e8d6a8;margin-bottom:4px;">挑战记录</div>
+    <div style="font-size:10px;color:rgba(170,195,190,.42);line-height:1.8;margin-bottom:12px;">从初始台地到灾厄盖侬，再到英杰之诗。每一项进度都会即时记录。</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;">
+    ${JAD.challenges.map(c=>{
+      const [val,tgt]=getChallengeValue(c);
+      const done=val>=tgt;
+      const pct=clamp(val/Math.max(1,tgt)*100,0,100);
+      return `<div style="padding:12px 13px;background:rgba(12,18,20,.55);border:1px solid ${done?'rgba(120,190,120,.3)':'rgba(130,150,150,.12)'};border-left:2px solid ${done?'#6fbf3f':'#9a8248'};border-radius:2px 8px 2px 8px;">
+        <div style="display:flex;justify-content:space-between;gap:10px;"><span style="font-size:12px;color:#ded3b6;">${escapeHtml(c.name)}</span><span style="font-size:10px;color:${done?'#8ad477':'rgba(220,200,150,.7)'};">${val}/${tgt}</span></div>
+        <div style="font-size:9px;color:rgba(170,195,190,.42);line-height:1.7;margin:5px 0 8px;">${escapeHtml(c.desc)}</div>
+        <div class="jq-bar"><i style="width:${pct}%"></i></div>
+      </div>`;
+    }).join('')}</div>`;
+}
+function startVirtualShrine(idx){
+  const base=JAD.shrines.length;
+  const data=idx<base?JAD.shrines[idx]:JAD.dlcShrines[idx-base];
+  if(!data) return;
+  if(virtualShrineCompleted(idx)){ toast('这座神庙的投影已经完成'); return; }
+  closeJournal();
+  openShrinePuzzle({
+    name:(idx<base?'试炼投影 · ':'DLC 试炼投影 · ')+data.name,
+    type:'virtual',virtualIndex:idx,challengeCleared:false,
+  });
+  $('shrineDesc').textContent='希卡之石投出的试炼影像。完成它，为真正的神庙留下记录。';
+}
+
+document.querySelectorAll('.journal-tab').forEach(b=>b.addEventListener('click',()=>setJournalTab(b.dataset.tab)));
+$('journalCloseBtn').addEventListener('click',closeJournal);
+$('journalOverlay').addEventListener('click',e=>{ if(e.target===$('journalOverlay')) closeJournal(); });
+
+// ============================================================
+// 交互（含剧情推进）
+// ============================================================
+let dialogActive=false, dialogQueue=[], dialogOnClose=null;
+function toast(msg){ const t=$('toast'); t.textContent=msg; t.style.opacity='1'; clearTimeout(t._timer); t._timer=setTimeout(()=>t.style.opacity='0',2200); }
+function startDialog(speaker, lines, onClose){
+  dialogActive = true; dialogQueue = lines.slice();
+  dialogOnClose = onClose || null;
+  $('dialog').style.display = 'block';
+  const sp=document.querySelector('#dialog .speaker'); if(sp) sp.textContent = speaker;
+  nextDialog(); SFX.dialog();
+}
+function nextDialog(){
+  if(dialogQueue.length === 0){ closeDialog(); return; }
+  const body=document.querySelector('#dialog .body'); if(body) body.textContent = dialogQueue.shift();
+}
+function closeDialog(){
+  dialogActive = false; $('dialog').style.display = 'none';
+  if(dialogOnClose){ const f = dialogOnClose; dialogOnClose = null; f(); }
+}
+$('dialog').addEventListener('click',()=>{ if(dialogActive) nextDialog(); });
+function closeAllPanels(){
+  closeMap(); closeInventory(); closeCook(); closeCompendium(); closeJournal(); closeDialog(); closeShrinePuzzle();
+  const mem=$('memoryOverlay'); if(mem) mem.style.display='none';
+}
+
+function tryInteract(){
+  if(player.state==='dead') return;
+  if(dialogActive){ nextDialog(); return; }
+  if(heldProp){ endCarry(false); return; }
+  if(ridingCycle){ dismountMasterCycle(); return; }
+  if(player.riding){ dismountHorse(); return; }
+  if(masterCycle&&masterCycle.group.visible&&masterCycle.pos.distanceTo(player.pos)<4.2){ mountMasterCycle(); return; }
+  const nearHorse=findNearestHorse(5.2);
+  if(nearHorse){ mountHorse(nearHorse); return; }
+  if(mapOpen||invOpen||cookOpen||$('shrineOverlay').style.display==='flex') return;
+  const nearProp=nearestPhysicsProp(4.2);
+  if(nearProp){ beginCarry(nearProp); return; }
+  for(const t of towers){
+    if(t.pos.distanceTo(player.pos)<9){
+      if(!t.activated) activateTower(t);
+      else startDialog(t.name,['蓝色的希卡纹路在塔身上流动。','这座塔的终端已经与希卡之石同步。','塔顶的风很大，能看见很远的地方。']);
+      return;
+    }
+  }
+  for(const c of campfires){
+    if(c.pos && c.pos.distanceTo(player.pos)<4.6){ openCook(); return; }
+  }
+  for(const ore of caveOres){
+    if(!ore.collected && ore.pos.distanceTo(player.pos)<3.2){
+      ore.collected=true; ore.group.visible=false;
+      grantMaterial(ore.color===0xffaa44?'amber':ore.color===0xaa88ff?'luminous_stone':'opal',randInt(1,2));
+      emitParticles(sparkSys,ore.pos.x,ore.pos.y+0.6,ore.pos.z,30,5,0.8,new THREE.Color(ore.color));
+      SFX.loot(); toast('采集 · 矿石'); return;
+    }
+  }
+  for(const st of goddessStatues){
+    if(st.pos.distanceTo(player.pos)<4.2){
+      if(quest.spiritOrbs>=4){
+        quest.spiritOrbs-=4;
+        player.maxHp+=1; player.hp=player.maxHp; updateHearts(); updateQuestHUD();
+        emitParticles(sparkSys,st.pos.x,st.pos.y+2,st.pos.z,80,6,1.3,new THREE.Color(0xffe6a0));
+        SFX.shrineSolve();
+        startDialog('海利亚女神像',['四枚灵魂宝珠化作温暖的光。','「你的器量又增大了，勇者。」','心之容器 +1 · 生命完全恢复']);
+      } else if(!st.used){
+        st.used=true;
+        player.hp=player.maxHp; updateHearts();
+        emitParticles(sparkSys,st.pos.x,st.pos.y+2,st.pos.z,45,5,1.0,new THREE.Color(0xffe6a0));
+        SFX.shrineSolve();
+        startDialog('海利亚女神像',['温暖的光落在你身上。','「愿你旅途平安，勇者。」','生命完全恢复。收集 4 枚灵魂宝珠可换取心之容器。']);
+      } else {
+        startDialog('海利亚女神像',['女神像静静伫立着。',`灵魂宝珠：${quest.spiritOrbs||0}/4。`,'每 4 枚宝珠可以换取一颗心之容器。','海拉鲁的风穿过残破的穹顶。']);
+      }
+      return;
+    }
+  }
+  for(const cv of caves){
+    if(cv.pos.distanceTo(player.pos)<11){
+      startDialog(cv.name,['潮湿的岩壁深处传来风声。','洞里有矿石的微光，也有魔物的低吼。','小心前进。']);
+      return;
+    }
+  }
+  // NPC
+  for(const npc of npcs){
+    if(npc.pos.distanceTo(player.pos) < 4.5){
+      if(npc.type === 'elder' && quest.stage === 'tutorial' && !npc.talked){
+        startDialog(npc.name, npc.lines, () => {
+          quest.stage = 'divine';
+          updateQuestHUD();
+          toast('任务更新 · 解放四神兽');
+          playTeleportFX(npc.pos.clone(), 0x88e0ff, 1.2);
+          SFX.champion();
+        });
+      } else if(npc.type === 'elder' && quest.stage === 'divine' && !quest.divineCleared.water){
+        startDialog(npc.name, [
+          '你还没解放任何神兽……',
+          '建议先去东北方的卓拉领地。',
+          '水之神兽 · 瓦·露塔就在那里。',
+          '沿着河往上游走，找卓拉族问问路。'
+        ]);
+      } else {
+        startDialog(npc.name, npc.lines);
+      }
+      npc.talked = true;
+      return;
+    }
+  }
+  const masterShrine=shrines.find(s=>s.type==='master');
+  if(masterShrine&&player.pos.distanceTo(masterShrine.pos)<8){ tryPullMasterSword(); return; }
+  for(const spot of memorySpots){ if(!spot.collected&&spot.pos.distanceTo(player.pos)<5){ collectMemory(spot); return; } }
+  for(const k of koroks){
+    if(!k.collected&&k.pos.distanceTo(player.pos)<4){
+      k.collected=true; k.group.visible=false; player.korokSeeds++; submitRecordIfBetter('korok',player.korokSeeds);
+      SFX.korok(); emitParticles(sparkSys,k.pos.x,k.pos.y+0.5,k.pos.z,30,4,1.0,new THREE.Color(0x88ff66));
+      toast('呀哈哈！获得克洛格种子 ×1'); updateQuestHUD(); return;
+    }
+  }
+  for(const s of shrines){
+    if(s.type==='master'||s.type==='ganon') continue;
+    if(s.pos.distanceTo(player.pos)<7){
+      if(!s.activated){
+        activateShrine(s);
+        if(s.type==='divine'){ handleDivineArrival(s); return; }
+        if(s.type==='dlc'){ startDLC(); return; }
+        if(s.type==='tutorial'||s.type==='puzzle'){ openShrinePuzzle(s); return; }
+      } else {
+        if(s.type==='tutorial'||s.type==='puzzle'){ openShrinePuzzle(s); return; }
+        if(s.type==='divine'){
+          const id=DIVINE_ID_BY_SHRINE[s.name];
+          if(id&&!quest.divineCleared[id]){ handleDivineArrival(s); return; }
+          if(quest.dlcActive&&quest.dlcStage===2&&id&&!quest.dlcSongs[id]){ startChampionsSongTrial(s); return; }
+          if(quest.dlcActive&&quest.dlcStage>=3&&id&&quest.dlcSongs[id]){ startDialog(s.name,['英杰之歌已经完成。','神兽的鼓动与英杰的灵魂一同安息。']); return; }
+          startDialog(s.name,['神兽的躯体已归于沉寂。','透过控制台，仍能听见英杰留下的声音。']);
+          return;
+        }
+        if(s.type==='dlc'){ handleDLCReturn(); return; }
+      }
+      return;
+    }
+  }
+  const ganonShrine=shrines.find(s=>s.type==='ganon');
+  if(ganonShrine&&player.pos.distanceTo(ganonShrine.pos)<18){ if(!ganonShrine.activated) activateShrine(ganonShrine); startGanonFight(); return; }
+  for(const c of chests){
+    if(!c.opened&&c.pos.distanceTo(player.pos)<4){
+      c.opened=true; c.lid.rotation.x=-1.4; SFX.loot();
+      const pool=['knight_bow','ancient_shield','royal_sword','guardian_gear','ruby','hearty_radish','mighty_bananas','raw_meat','star_fragment'];
+      const id=pool[randInt(0,pool.length-1)];
+      let name=id;
+      const w=WEAPON_DEFS.find(x=>x.id===id);
+      const s=SHIELD_DEFS.find(x=>x.id===id);
+      const b=BOW_DEFS.find(x=>x.id===id);
+      const m=MATERIAL_DEFS.find(x=>x.id===id);
+      if(w){ const item={...w,curDur:w.dur,qty:1}; inventory.weapons.push(item); name=w.name; }
+      else if(s){ const item={...s,curDur:s.dur,qty:1}; inventory.shields.push(item); name=s.name; }
+      else if(b){ const item={...b,curDur:b.dur,qty:1}; inventory.bows.push(item); name=b.name; }
+      else if(m){ grantMaterial(id,randInt(1,3)); name=m.name; }
+      updateWeaponHUD(); renderJournal();
+      startDialog('宝箱',['你打开了宝箱。',`获得了「${name}」。`]);
+      return;
+    }
+  }
+  startDialog('旅人',['海拉鲁的风，今天也很喧嚣。','按 Tab 可以切换盾牌。','按 F 可以从背后偷袭未发现你的敌人。','举盾+空格 可以盾滑，瞄准+空格 可以后跳。','树木、塔、建筑、岩石——万物皆可攀爬。']);
+}
+
+// ============================================================
+// 小地图 + 全地图（海拉鲁色彩/高度缓存，避免每帧重算地形）
+// ============================================================
+let mapOpen=false,mapBaseCanvas=null;
+const MAP_W=200,MAP_H=160;
+const MAP_CACHE_W=384, MAP_CACHE_H=308;
+let mapCacheCanvas=null, mapCacheColors=null, mapCacheHeights=null;
+function mapColorAt(wx,wz,h){
+  if(h===undefined) h=terrainHeight(wx,wz);
+  const nx=wx/HALF_X,nz=wz/HALF_Z;
+  const hebraDist=Math.hypot(nx+0.62,nz+0.55);
+  const deathDist=Math.hypot(nx-0.55,nz+0.45);
+  const gerudoDist=Math.hypot(nx+0.30,nz-0.55);
+  const faronDist=Math.hypot(nx-0.35,nz-0.68);
+  const rd=riverDist(wx,wz);
+  let r,g,b;
+  if(rd<28){ r=45; g=95; b=125; }
+  else if(h<WATER_LEVEL){ const deep=clamp((WATER_LEVEL-h)/30,0,1); r=lerp(60,20,deep); g=lerp(110,50,deep); b=lerp(140,85,deep); }
+  else if(hebraDist<0.20&&h>120){ r=220; g=230; b=238; }
+  else if(deathDist<0.16&&h>200){ r=80; g=50; b=40; }
+  else if(gerudoDist<0.14&&h<30){ r=216; g=200; b=144; }
+  else if(faronDist<0.10&&h<40){ r=60; g=110; b=55; }
+  else if(h>300){ r=180; g=190; b=200; }
+  else if(h>150){ r=140; g=130; b=105; }
+  else { const t=clamp((h-WATER_LEVEL)/100,0,1); r=lerp(80,110,t); g=lerp(110,140,t); b=lerp(60,80,t); }
+  return [r,g,b];
+}
+async function buildMapCacheAsync(){
+  if(mapCacheCanvas) return;
+  const W=MAP_CACHE_W, H=MAP_CACHE_H;
+  const colors=new Uint8ClampedArray(W*H*4);
+  const heights=new Float32Array(W*H);
+  let y=0;
+  while(y<H){
+    const t0=performance.now();
+    for(; y<H && performance.now()-t0<5; y++){
+      for(let x=0;x<W;x++){
+        const wx=(x/(W-1)-0.5)*WORLD_X, wz=(y/(H-1)-0.5)*WORLD_Z;
+        const h=terrainHeight(wx,wz);
+        heights[y*W+x]=h;
+        const c=mapColorAt(wx,wz,h);
+        const i=(y*W+x)*4;
+        colors[i]=c[0]; colors[i+1]=c[1]; colors[i+2]=c[2]; colors[i+3]=255;
+      }
+    }
+    setLoading(0.70+0.20*(y/H), '绘制海拉鲁地图 · '+Math.round(y/H*100)+'%');
+    await nextFrame();
+  }
+  // 山体阴影 + 等高线
+  const shaded=new Uint8ClampedArray(colors.length);
+  const dx=WORLD_X/(W-1), dz=WORLD_Z/(H-1);
+  for(let yy=0;yy<H;yy++){
+    for(let xx=0;xx<W;xx++){
+      const i=yy*W+xx;
+      const h=heights[i];
+      const hl=heights[yy*W+Math.max(0,xx-1)], hr=heights[yy*W+Math.min(W-1,xx+1)];
+      const hu=heights[Math.max(0,yy-1)*W+xx], hd=heights[Math.min(H-1,yy+1)*W+xx];
+      const gx=(hr-hl)/(2*dx), gz=(hd-hu)/(2*dz);
+      let shade=clamp(1-(gx*0.62+gz*0.38)*0.16,0.72,1.22);
+      // 等高线：每 60m 一条
+      const band=Math.floor(h/60), bandR=Math.floor(hr/60), bandD=Math.floor(hd/60);
+      if(band!==bandR||band!==bandD) shade*=0.88;
+      const o=i*4;
+      shaded[o]=clamp(colors[o]*shade,0,255);
+      shaded[o+1]=clamp(colors[o+1]*shade,0,255);
+      shaded[o+2]=clamp(colors[o+2]*shade,0,255);
+      shaded[o+3]=255;
+    }
+  }
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const ctx=cv.getContext('2d');
+  const img=ctx.createImageData(W,H);
+  img.data.set(shaded);
+  ctx.putImageData(img,0,0);
+  mapCacheCanvas=cv; mapCacheColors=shaded; mapCacheHeights=heights;
+  console.log('[map] cache built', W+'x'+H);
+}
+function buildMapBase(){
+  if(mapBaseCanvas) return mapBaseCanvas;
+  const cv=document.createElement('canvas'); cv.width=720; cv.height=576;
+  const ctx=cv.getContext('2d');
+  ctx.fillStyle='#0b141c'; ctx.fillRect(0,0,720,576);
+  if(mapCacheCanvas){
+    ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(mapCacheCanvas,0,0,720,576);
+  }
+  // 经纬网格
+  ctx.strokeStyle='rgba(150,210,235,.055)'; ctx.lineWidth=1;
+  for(let i=1;i<10;i++){
+    const x=Math.round(720*i/10)+0.5, y=Math.round(576*i/10)+0.5;
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,576); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(720,y); ctx.stroke();
+  }
+  mapBaseCanvas=cv; return cv;
+}
+const MM_VIEW=150;
+let mmDrawTimer=0;
+function updateMinimapData(dt){ /* 地图缓存后无需逐帧采样 */ }
+function drawMinimap(force){
+  const cv=$('minimapCanvas'); if(!cv) return;
+  const now=performance.now();
+  if(!force && now-mmDrawTimer<80) return;
+  mmDrawTimer=now;
+  const ctx=cv.getContext('2d');
+  const W=cv.width,H=cv.height,R=W/2;
+  ctx.clearRect(0,0,W,H);
+  ctx.save();
+  ctx.beginPath(); ctx.arc(R,R,R-1,0,Math.PI*2); ctx.clip();
+  ctx.fillStyle='#071019'; ctx.fillRect(0,0,W,H);
+  if(mapCacheCanvas){
+    const sw=MM_VIEW*2/WORLD_X*MAP_CACHE_W, sh=MM_VIEW*2/WORLD_Z*MAP_CACHE_H;
+    const sx=(player.pos.x/WORLD_X+0.5)*MAP_CACHE_W-sw/2;
+    const sy=(player.pos.z/WORLD_Z+0.5)*MAP_CACHE_H-sh/2;
+    ctx.imageSmoothingEnabled=true;
+    ctx.drawImage(mapCacheCanvas, sx, sy, sw, sh, 0,0,W,H);
+  }
+  ctx.fillStyle='rgba(0,0,0,0.10)';
+  ctx.fillRect(0,0,W,H);
+  collidables.forEach(c=>{
+    if(c.type==='tree'||c.type==='rock'||c.type==='chest') return;
+    const dx=(c.pos.x-player.pos.x)/MM_VIEW*R;
+    const dy=(c.pos.z-player.pos.z)/MM_VIEW*R;
+    if(Math.hypot(dx,dy)>R-4) return;
+    ctx.fillStyle = c.type==='castle'?'#ffcc44':c.type==='house'?'#c8b088':c.type==='tower'?'#88ddff':'#a0a0a0';
+    ctx.fillRect(R+dx-1.5,R+dy-1.5,3,3);
+  });
+  shrines.forEach(s=>{
+    const dx=(s.pos.x-player.pos.x)/MM_VIEW*R;
+    const dy=(s.pos.z-player.pos.z)/MM_VIEW*R;
+    if(Math.hypot(dx,dy)>R-5) return;
+    ctx.beginPath();
+    ctx.arc(R+dx,R+dy,s.activated?2.6:1.8,0,Math.PI*2);
+    ctx.fillStyle=s.activated?'#66ccff':'#6b7788';
+    ctx.fill();
+    if(s.activated){ ctx.strokeStyle='rgba(200,240,255,.8)'; ctx.lineWidth=0.8; ctx.stroke(); }
+  });
+  npcs.forEach(n=>{
+    const dx=(n.pos.x-player.pos.x)/MM_VIEW*R;
+    const dy=(n.pos.z-player.pos.z)/MM_VIEW*R;
+    if(Math.hypot(dx,dy)>R-5) return;
+    ctx.beginPath(); ctx.arc(R+dx,R+dy,2.2,0,Math.PI*2);
+    ctx.fillStyle='#88ff88'; ctx.fill();
+  });
+  monsters.forEach(m=>{
+    if(m.state==='dead') return;
+    const dx=(m.pos.x-player.pos.x)/MM_VIEW*R;
+    const dy=(m.pos.z-player.pos.z)/MM_VIEW*R;
+    if(Math.hypot(dx,dy)>R-5) return;
+    const isBoss=(m.type==='ganon'||m.type==='divineBoss'||m.type==='lynel');
+    ctx.beginPath();
+    ctx.arc(R+dx,R+dy,isBoss?3.4:1.9,0,Math.PI*2);
+    ctx.fillStyle=isBoss?'#ff66ff':'#ff5544';
+    ctx.fill();
+  });
+  horses.forEach(h=>{
+    const dx=(h.pos.x-player.pos.x)/MM_VIEW*R;
+    const dy=(h.pos.z-player.pos.z)/MM_VIEW*R;
+    if(Math.hypot(dx,dy)>R-5) return;
+    ctx.beginPath(); ctx.arc(R+dx,R+dy,2.1,0,Math.PI*2);
+    ctx.fillStyle=h===activeHorse?'#ffe066':'#e8c878'; ctx.fill();
+    if(h===activeHorse){ ctx.strokeStyle='#fff'; ctx.lineWidth=0.9; ctx.stroke(); }
+  });
+  // 任务目标
+  const obj = getObjective();
+  if(obj){
+    const dx=(obj.x-player.pos.x)/MM_VIEW*R;
+    const dy=(obj.z-player.pos.z)/MM_VIEW*R;
+    if(Math.hypot(dx,dy)<=R-5){
+      ctx.beginPath(); ctx.arc(R+dx,R+dy,3.2,0,Math.PI*2);
+      ctx.fillStyle='#ffdd44'; ctx.fill();
+      ctx.strokeStyle='#fff'; ctx.lineWidth=0.9; ctx.stroke();
+    }
+  }
+  ctx.restore();
+  // 罗盘刻度
+  ctx.save(); ctx.translate(R,R);
+  for(let i=0;i<8;i++){
+    const a=i*Math.PI/4;
+    ctx.beginPath();
+    ctx.moveTo(Math.sin(a)*(R-6),-Math.cos(a)*(R-6));
+    ctx.lineTo(Math.sin(a)*(R-2),-Math.cos(a)*(R-2));
+    ctx.strokeStyle=i===0?'rgba(200,240,255,.75)':'rgba(160,210,230,.25)';
+    ctx.lineWidth=i===0?1.6:1; ctx.stroke();
+  }
+  ctx.restore();
+  ctx.save();
+  ctx.translate(R,R);
+  ctx.rotate(Math.atan2(Math.cos(player.yaw),Math.sin(player.yaw))+Math.PI/2);
+  ctx.beginPath();
+  ctx.moveTo(0,-6.5); ctx.lineTo(4.8,5.2); ctx.lineTo(0,2.6); ctx.lineTo(-4.8,5.2);
+  ctx.closePath();
+  ctx.fillStyle='#ffe066'; ctx.fill();
+  ctx.strokeStyle='#000'; ctx.lineWidth=0.9; ctx.stroke();
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(R,R,R-1,0,Math.PI*2);
+  ctx.strokeStyle='rgba(120,220,255,.55)'; ctx.lineWidth=2; ctx.stroke();
+  ctx.fillStyle='#9fe0ff'; ctx.font='bold 10px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('N',R,13);
+}
+// ============================================================
+// ★ 海拉鲁地图：区域 / 道路 / 图标 / 缩放平移 / 悬停提示
+// ============================================================
+const MAP_BASE_W=720, MAP_BASE_H=576;
+const MAP_REGIONS=[
+  {x:-170,z:400,name:'初始台地',size:11},
+  {x:0,z:-20,name:'中央海拉鲁',size:13},
+  {x:-700,z:-680,name:'海布拉',size:12},
+  {x:780,z:-560,name:'奥尔汀',size:12},
+  {x:760,z:-300,name:'阿卡莱',size:11},
+  {x:620,z:-80,name:'拉聂尔',size:12},
+  {x:-700,z:620,name:'格鲁德',size:12},
+  {x:560,z:760,name:'费罗尼',size:12},
+  {x:470,z:470,name:'哈特诺',size:10},
+  {x:650,z:870,name:'哈特尔',size:10},
+  {x:-260,z:620,name:'卡卡利科',size:10},
+  {x:30,z:560,name:'海利亚湖',size:9},
+  {x:760,z:-680,name:'死亡之山',size:9},
+  {x:-120,z:-760,name:'克洛格森林',size:9}
+];
+const MAP_ROADS=[
+  [[0,-30],[-30,40],[-80,160],[-130,300],[-170,400]],
+  [[0,-30],[140,60],[340,200],[470,430],[520,540]],
+  [[0,-30],[220,-90],[460,-110],[650,-100]],
+  [[0,-30],[210,-240],[460,-420],[700,-540],[800,-600]],
+  [[0,-30],[-200,-230],[-480,-470],[-720,-700]],
+  [[0,-30],[-180,120],[-430,320],[-680,600]],
+  [[0,-30],[190,220],[400,480],[540,720]],
+  [[-170,400],[-230,470],[-290,600],[-320,660]],
+  [[470,430],[560,520],[650,620]]
+];
+const MAP_POIS=[
+  {x:0,z:-50,name:'海拉鲁城堡',kind:'castle'},
+  {x:0,z:-100,name:'灾厄盖侬',kind:'boss'}
+];
+let mapZoom=1, mapPanX=0, mapPanY=0, mapDragging=false, mapDragMoved=false, mapDragStart=null;
+let mapHover=null, mapMouse=null;
+let mapMarkersCache=[];
+function mapBasePos(x,z){ return { x:(x/WORLD_X+0.5)*MAP_BASE_W, y:(z/WORLD_Z+0.5)*MAP_BASE_H }; }
+function mapScreenPos(x,z){ const b=mapBasePos(x,z); return { x:b.x*mapZoom+mapPanX, y:b.y*mapZoom+mapPanY }; }
+function mapClampPan(){
+  const maxX=Math.max(0,(mapZoom-1)*MAP_BASE_W/2);
+  const maxY=Math.max(0,(mapZoom-1)*MAP_BASE_H/2);
+  mapPanX=clamp(mapPanX,-maxX,maxX);
+  mapPanY=clamp(mapPanY,-maxY,maxY);
+}
+function mapRegionAt(x,z){
+  let best=MAP_REGIONS[0], bd=Infinity;
+  for(const r of MAP_REGIONS){
+    const d=Math.hypot((x-r.x)*0.9, z-r.z);
+    if(d<bd){ bd=d; best=r; }
+  }
+  return best;
+}
+function buildMapMarkers(){
+  const out=[];
+  shrines.forEach(s=>{
+    let kind='shrine';
+    if(s.type==='divine') kind='divine';
+    else if(s.type==='master') kind='master';
+    else if(s.type==='ganon') kind='boss';
+    else if(s.type==='dlc') kind='dlc';
+    out.push({x:s.pos.x,z:s.pos.z,name:s.name,kind,data:s});
+  });
+  towers.forEach(t=>out.push({x:t.pos.x,z:t.pos.z,name:t.name,kind:'tower',data:t}));
+  stables.forEach(t=>out.push({x:t.pos.x,z:t.pos.z,name:t.name,kind:'stable'}));
+  caves.forEach(c=>out.push({x:c.pos.x,z:c.pos.z,name:'洞穴 · '+c.name,kind:'cave'}));
+  goddessStatues.forEach(g=>out.push({x:g.pos.x,z:g.pos.z,name:'海利亚女神像',kind:'goddess'}));
+  out.push({x:LANDMARKS.greatPlateau.x+78,z:LANDMARKS.greatPlateau.z+82,name:'时之神殿',kind:'temple'});
+  out.push({x:-880,z:790,name:'依盖队基地',kind:'boss'});
+  ['kakariko','hateno','zora','goron','gerudoTown','rito'].forEach(k=>{
+    const L=LANDMARKS[k]; if(L) out.push({x:L.x,z:L.z,name:L.name,kind:'town'});
+  });
+  MAP_POIS.forEach(p=>out.push({x:p.x,z:p.z,name:p.name,kind:p.kind}));
+  return out;
+}
+function drawMapRoads(ctx){
+  ctx.save();
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.setLineDash([7/mapZoom,6/mapZoom]);
+  for(const road of MAP_ROADS){
+    ctx.beginPath();
+    for(let i=0;i<road.length;i++){
+      const p=mapBasePos(road[i][0],road[i][1]);
+      if(i===0) ctx.moveTo(p.x,p.y); else ctx.lineTo(p.x,p.y);
+    }
+    ctx.strokeStyle='rgba(238,222,176,.30)';
+    ctx.lineWidth=3.2/mapZoom; ctx.stroke();
+    ctx.strokeStyle='rgba(255,244,210,.55)';
+    ctx.lineWidth=1.1/mapZoom; ctx.stroke();
+  }
+  ctx.restore();
+}
+function drawMapIcon(ctx,x,y,kind,active){
+  ctx.save(); ctx.translate(x,y);
+  if(kind==='shrine'||kind==='master'||kind==='dlc'){
+    const col=active?'#66ccff':(kind==='master'?'#ffdd88':kind==='dlc'?'#c88aff':'#5d6a7a');
+    ctx.rotate(Math.PI/4);
+    ctx.fillStyle=active?col:'rgba(70,82,96,.85)';
+    ctx.strokeStyle=active?'#e0f6ff':'rgba(150,165,180,.7)';
+    ctx.lineWidth=1.1;
+    ctx.fillRect(-4.2,-4.2,8.4,8.4); ctx.strokeRect(-4.2,-4.2,8.4,8.4);
+    if(active){ ctx.rotate(-Math.PI/4); ctx.beginPath(); ctx.arc(0,0,1.5,0,Math.PI*2); ctx.fillStyle='#f0ffff'; ctx.fill(); }
+  } else if(kind==='tower'){
+    ctx.beginPath(); ctx.moveTo(0,-7); ctx.lineTo(4.6,5); ctx.lineTo(-4.6,5); ctx.closePath();
+    ctx.fillStyle='rgba(120,220,255,.9)'; ctx.fill();
+    ctx.strokeStyle='#e9fbff'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle='#0b1a24'; ctx.fillRect(-1.2,-2,2.4,5);
+  } else if(kind==='stable'){
+    ctx.beginPath(); ctx.arc(0,0,5.2,Math.PI*0.15,Math.PI*0.85,true);
+    ctx.lineWidth=2.2; ctx.strokeStyle='#e0c08a'; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,2.0,0,Math.PI*2); ctx.fillStyle='#e0c08a'; ctx.fill();
+  } else if(kind==='town'){
+    ctx.beginPath(); ctx.moveTo(0,-6); ctx.lineTo(6,0); ctx.lineTo(6,6); ctx.lineTo(-6,6); ctx.lineTo(-6,0); ctx.closePath();
+    ctx.fillStyle='rgba(232,214,170,.92)'; ctx.fill();
+    ctx.strokeStyle='#3a3024'; ctx.lineWidth=1; ctx.stroke();
+  } else if(kind==='divine'){
+    ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(6,0); ctx.lineTo(0,8); ctx.lineTo(-6,0); ctx.closePath();
+    ctx.fillStyle=active?'#ffd166':'#a88a44'; ctx.fill();
+    ctx.strokeStyle='#fff2c8'; ctx.lineWidth=1.1; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,0,2.1,0,Math.PI*2); ctx.fillStyle=active?'#3a2a10':'#2a2418'; ctx.fill();
+  } else if(kind==='boss'){
+    ctx.beginPath(); ctx.arc(0,0,6.2,0,Math.PI*2);
+    ctx.fillStyle='rgba(120,20,30,.85)'; ctx.fill();
+    ctx.strokeStyle='#ff7a68'; ctx.lineWidth=1.2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(-2.1,-0.8,1.2,0,Math.PI*2); ctx.arc(2.1,-0.8,1.2,0,Math.PI*2);
+    ctx.fillStyle='#ffd0c8'; ctx.fill();
+  } else if(kind==='castle'){
+    ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(7,6); ctx.lineTo(-7,6); ctx.closePath();
+    ctx.fillStyle='rgba(255,220,130,.95)'; ctx.fill();
+    ctx.strokeStyle='#fff6d8'; ctx.lineWidth=1.1; ctx.stroke();
+    ctx.fillStyle='#3a2a10';
+    ctx.beginPath(); ctx.moveTo(0,-2.5); ctx.lineTo(3.2,2); ctx.lineTo(-3.2,2); ctx.closePath(); ctx.fill();
+  } else if(kind==='cave'){
+    ctx.beginPath(); ctx.arc(0,1,5.6,Math.PI,0,false); ctx.lineTo(5.6,5); ctx.lineTo(-5.6,5); ctx.closePath();
+    ctx.fillStyle='rgba(25,24,22,.95)'; ctx.fill(); ctx.strokeStyle='rgba(190,200,195,.8)'; ctx.lineWidth=1.2; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,1,2.1,Math.PI,0,false); ctx.fillStyle='rgba(100,220,255,.7)'; ctx.fill();
+  } else if(kind==='temple'){
+    ctx.beginPath(); ctx.moveTo(-6,5); ctx.lineTo(-6,-2); ctx.lineTo(0,-7); ctx.lineTo(6,-2); ctx.lineTo(6,5); ctx.closePath();
+    ctx.fillStyle='rgba(235,225,190,.9)'; ctx.fill(); ctx.strokeStyle='#6a6040'; ctx.lineWidth=1; ctx.stroke();
+    ctx.fillStyle='#6a6040'; ctx.fillRect(-1.3,0,2.6,5);
+  } else if(kind==='goddess'){
+    ctx.beginPath(); ctx.arc(0,0,5,0,Math.PI*2); ctx.fillStyle='rgba(255,236,180,.9)'; ctx.fill();
+    ctx.strokeStyle='#fff8dc'; ctx.lineWidth=1; ctx.stroke();
+    ctx.beginPath(); ctx.arc(0,-1.3,1.5,0,Math.PI*2); ctx.fillStyle='#7a6030'; ctx.fill();
+  }
+  ctx.restore();
+}
+function drawMap(){
+  const cv=$('mapCanvas'); if(!cv) return;
+  const ctx=cv.getContext('2d'), W=cv.width, H=cv.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#08121a'; ctx.fillRect(0,0,W,H);
+  ctx.save();
+  ctx.translate(mapPanX,mapPanY); ctx.scale(mapZoom,mapZoom);
+  ctx.drawImage(buildMapBase(),0,0,W,H);
+  drawMapRoads(ctx);
+  // 世界边缘
+  ctx.strokeStyle='rgba(140,210,240,.18)'; ctx.lineWidth=2/mapZoom;
+  ctx.strokeRect(0,0,W,H);
+  ctx.restore();
+
+  // 区域名
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  for(const r of MAP_REGIONS){
+    const p=mapScreenPos(r.x,r.z);
+    if(p.x<-40||p.x>W+40||p.y<-20||p.y>H+20) continue;
+    const name=I18N.t(r.name);
+    const fs=Math.round((r.size-2)*0.7+6+(mapZoom-1)*1.2);
+    ctx.font=`${fs}px "Georgia","Noto Serif SC","Noto Serif JP",serif`;
+    ctx.letterSpacing='2px';
+    ctx.lineWidth=3; ctx.strokeStyle='rgba(4,10,14,.62)';
+    ctx.strokeText(name, p.x, p.y);
+    ctx.fillStyle='rgba(228,242,250,.58)';
+    ctx.shadowColor='rgba(0,0,0,.95)'; ctx.shadowBlur=6;
+    ctx.fillText(name, p.x, p.y);
+  }
+  ctx.shadowBlur=0; ctx.letterSpacing='0px';
+
+  // 图标
+  if(mapMarkersCache.length===0) mapMarkersCache=buildMapMarkers();
+  const hover=mapHover;
+  for(const m of mapMarkersCache){
+    const p=mapScreenPos(m.x,m.z);
+    if(p.x<-20||p.x>W+20||p.y<-20||p.y>H+20) continue;
+    const active=m.kind==='divine'?!!(m.data&&m.data.activated):(m.data?!!m.data.activated:true);
+    if(hover===m){ ctx.beginPath(); ctx.arc(p.x,p.y,11,0,Math.PI*2); ctx.fillStyle='rgba(120,220,255,.14)'; ctx.fill(); ctx.strokeStyle='rgba(160,235,255,.6)'; ctx.lineWidth=1; ctx.stroke(); }
+    drawMapIcon(ctx,p.x,p.y,m.kind,active);
+    if(mapZoom>=1.6||hover===m){
+      const label=I18N.t(m.name);
+      ctx.font='9px "Georgia","Noto Serif SC",serif';
+      ctx.textAlign='left';
+      const tw=ctx.measureText(label).width;
+      ctx.fillStyle='rgba(4,10,16,.72)';
+      ctx.fillRect(p.x+9,p.y-7,tw+8,14);
+      ctx.fillStyle=hover===m?'#e8f8ff':'rgba(210,235,250,.8)';
+      ctx.fillText(label,p.x+13,p.y+0.5);
+      ctx.textAlign='center';
+    }
+  }
+  // 城堡 / 盖侬 名称
+  if(mapZoom>=1.15){
+    ctx.font='10px "Georgia","Noto Serif SC","Noto Serif JP",serif';
+    ctx.textAlign='center';
+    for(const p of MAP_POIS){
+      const sp=mapScreenPos(p.x,p.z);
+      ctx.lineWidth=3; ctx.strokeStyle='rgba(4,10,14,.7)';
+      ctx.strokeText(I18N.t(p.name), sp.x, sp.y-13);
+      ctx.fillStyle='rgba(255,240,190,.8)';
+      ctx.fillText(I18N.t(p.name), sp.x, sp.y-13);
+    }
+  }
+  // 任务目标
+  const obj=getObjective();
+  if(obj){
+    const p=mapScreenPos(obj.x,obj.z);
+    ctx.beginPath(); ctx.arc(p.x,p.y,6.5,0,Math.PI*2);
+    ctx.strokeStyle='#ffdd44'; ctx.lineWidth=1.6; ctx.stroke();
+    ctx.beginPath(); ctx.arc(p.x,p.y,2.2,0,Math.PI*2); ctx.fillStyle='#ffe98a'; ctx.fill();
+  }
+  // 玩家视野 + 标记
+  const pp=mapScreenPos(player.pos.x,player.pos.z);
+  const ang=Math.atan2(Math.cos(player.yaw),Math.sin(player.yaw));
+  ctx.save();
+  ctx.translate(pp.x,pp.y); ctx.rotate(ang);
+  ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,34*mapZoom,-0.55,0.55); ctx.closePath();
+  ctx.fillStyle='rgba(255,224,102,.10)'; ctx.fill();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(pp.x,pp.y); ctx.rotate(ang+Math.PI/2);
+  ctx.beginPath(); ctx.moveTo(0,-8); ctx.lineTo(5.6,6); ctx.lineTo(0,3); ctx.lineTo(-5.6,6); ctx.closePath();
+  ctx.fillStyle='#ffe066'; ctx.fill(); ctx.strokeStyle='#241c04'; ctx.lineWidth=1.2; ctx.stroke();
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(pp.x,pp.y,12,0,Math.PI*2);
+  ctx.strokeStyle='rgba(255,224,102,.35)'; ctx.lineWidth=1; ctx.stroke();
+
+  // 图例/坐标
+  const sub=$('mapSub');
+  if(sub){
+    const total=shrines.filter(s=>s.type!=='divine'&&s.type!=='master'&&s.type!=='ganon'&&s.type!=='dlc').length;
+    const done=shrines.filter(s=>s.activated&&s.type!=='divine'&&s.type!=='master'&&s.type!=='ganon'&&s.type!=='dlc').length;
+    sub.textContent=`SHEIKAH SLATE · HYRULE 3000 × 2400 · ${I18N.t('神庙')} ${done}/${total}`;
+  }
+  if(mapMouse){
+    const b={x:(mapMouse.x-mapPanX)/mapZoom,y:(mapMouse.y-mapPanY)/mapZoom};
+    const wx=(b.x/W)-0.5, wz=(b.y/H)-0.5;
+    const worldX=wx*WORLD_X, worldZ=wz*WORLD_Z;
+    const reg=mapRegionAt(worldX,worldZ);
+    const co=$('mapCoords');
+    if(co) co.textContent=`X ${Math.round(worldX)} · Z ${Math.round(worldZ)} · ${I18N.t(reg.name)}`;
+  }
+}
+function mapFindMarker(cx,cy){
+  let best=null,bd=16;
+  for(const m of mapMarkersCache){
+    const p=mapScreenPos(m.x,m.z);
+    const d=Math.hypot(p.x-cx,p.y-cy);
+    if(d<bd){ bd=d; best=m; }
+  }
+  return best;
+}
+function mapShowTooltip(m,cx,cy){
+  const tip=$('mapTooltip'); if(!tip) return;
+  if(!m){ tip.style.display='none'; return; }
+  const cv=$('mapCanvas'), rect=cv.getBoundingClientRect();
+  const p=mapScreenPos(m.x,m.z);
+  const dist=Math.round(Math.hypot(m.x-player.pos.x,m.z-player.pos.z));
+  const st=m.kind==='shrine'?(m.data&&m.data.activated?I18N.t('已解放'):I18N.t('尚未激活')):'';
+  tip.innerHTML=`<div class="mt-name">${I18N.t(m.name)}</div><div class="mt-meta">${st?st+' · ':''}${I18N.t('距离')} ${dist}m</div>`;
+  I18N.translateDOM(tip);
+  tip.style.left=(p.x/cv.width*rect.width)+'px';
+  tip.style.top=(p.y/cv.height*rect.height)+'px';
+  tip.style.display='block';
+}
+function mapCanvasPoint(e){
+  const cv=$('mapCanvas'), rect=cv.getBoundingClientRect();
+  return { x:(e.clientX-rect.left)*(cv.width/rect.width), y:(e.clientY-rect.top)*(cv.height/rect.height) };
+}
+function mapZoomAt(cx,cy,factor){
+  const before={x:(cx-mapPanX)/mapZoom,y:(cy-mapPanY)/mapZoom};
+  mapZoom=clamp(mapZoom*factor,1,3.4);
+  mapPanX=cx-before.x*mapZoom; mapPanY=cy-before.y*mapZoom;
+  mapClampPan(); drawMap();
+}
+function mapResetView(){ mapZoom=1; mapPanX=0; mapPanY=0; drawMap(); }
+(function bindMapControls(){
+  const cv=$('mapCanvas'); if(!cv) return;
+  cv.addEventListener('mousedown',e=>{
+    if(e.button!==0) return;
+    mapDragging=true; mapDragMoved=false;
+    const p=mapCanvasPoint(e); mapDragStart={x:p.x,y:p.y,px:mapPanX,py:mapPanY};
+    $('mapWrap').classList.add('dragging');
+  });
+  cv.addEventListener('mousemove',e=>{
+    const p=mapCanvasPoint(e); mapMouse=p;
+    if(mapDragging&&mapDragStart){
+      const dx=p.x-mapDragStart.x, dy=p.y-mapDragStart.y;
+      if(Math.hypot(dx,dy)>4) mapDragMoved=true;
+      mapPanX=mapDragStart.px+dx; mapPanY=mapDragStart.py+dy;
+      mapClampPan(); drawMap();
+    } else {
+      const m=mapFindMarker(p.x,p.y);
+      if(m!==mapHover){ mapHover=m; drawMap(); mapShowTooltip(m,p.x,p.y); }
+      else if(m) mapShowTooltip(m,p.x,p.y);
+    }
+  });
+  cv.addEventListener('mouseleave',()=>{ mapMouse=null; mapHover=null; mapShowTooltip(null); drawMap(); });
+  window.addEventListener('mouseup',e=>{
+    if(!mapDragging) return;
+    mapDragging=false; $('mapWrap').classList.remove('dragging');
+    const p=mapCanvasPoint(e);
+    if(!mapDragMoved){
+      const m=mapFindMarker(p.x,p.y);
+      if(m){
+        SFX.dialog();
+        if(m.kind==='shrine'||m.kind==='divine'){
+          if(m.data&&!m.data.activated){ toast('该传送点尚未激活'); SFX.hit(); }
+          else if(m.data){ teleportTo(m.data); }
+        } else {
+          toast(I18N.t(m.name));
+        }
+      }
+    }
+    mapDragStart=null;
+  });
+  cv.addEventListener('wheel',e=>{
+    e.preventDefault();
+    const p=mapCanvasPoint(e);
+    mapZoomAt(p.x,p.y,e.deltaY<0?1.18:1/1.18);
+  },{passive:false});
+  $('mapZoomIn').addEventListener('click',e=>{ e.stopPropagation(); mapZoomAt(MAP_BASE_W/2, MAP_BASE_H/2, 1.25); });
+  $('mapZoomOut').addEventListener('click',e=>{ e.stopPropagation(); mapZoomAt(MAP_BASE_W/2, MAP_BASE_H/2, 0.8); });
+  $('mapReset').addEventListener('click',e=>{ e.stopPropagation(); mapResetView(); });
+})();
+// ---------- 排行榜（后端可选） ----------
+function escapeHtml(v){
+  return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+async function refreshLeaderboard(){
+  const el=$('mapRecords'); if(!el) return;
+  if(!window.BOTW_API || !window.BOTW_API.online){ el.style.display='none'; return; }
+  try{
+    const r=await window.BOTW_API.records('all');
+    const boards=(r&&r.boards)||{};
+    const labels={korok:'克洛格种子',shrines:'神庙',ganon:'盖侬'};
+    const rows=[];
+    for(const k of ['korok','shrines','ganon']){
+      const top=(boards[k]||[])[0];
+      if(top) rows.push(`<span class="rec-board">${escapeHtml(I18N.t(labels[k]))}</span><span class="rec-name">${escapeHtml(top.name)}</span><span class="rec-val">${escapeHtml(top.value)}</span>`);
+    }
+    if(rows.length){ el.innerHTML=`<div class="rec-row">${rows.join('')}</div>`; el.style.display='block'; }
+    else el.style.display='none';
+  }catch(e){ el.style.display='none'; }
+}
+function submitRecordIfBetter(board,value){
+  if(!window.BOTW_API || !window.BOTW_API.online) return;
+  const maxes=window.__botwRecordMax||(window.__botwRecordMax={korok:0,shrines:0,ganon:0});
+  if(!isFinite(value) || value<=(maxes[board]||0)) return;
+  maxes[board]=value;
+  window.BOTW_API.submitRecord(board, window.BOTW_API.getNickname(), value)
+    .then(refreshLeaderboard).catch(()=>{});
+}
+function openMap(){
+  if(mapOpen||dialogActive||teleporting||invOpen||cookOpen||player.state==='dead') return;
+  mapOpen=true; $('mapOverlay').style.display='flex';
+  mapHover=null; mapMarkersCache=[]; mapShowTooltip(null);
+  drawMap(); SFX.dialog();
+  refreshLeaderboard();
+  if(document.pointerLockElement) document.exitPointerLock();
+}
+function closeMap(){
+  if(!mapOpen) return;
+  mapOpen=false; $('mapOverlay').style.display='none';
+  mapShowTooltip(null);
+  try{ const p=canvas.requestPointerLock(); if(p&&p.catch) p.catch(()=>{}); }catch(e){}
+}
+
+// ============================================================
+// 死亡与复活
+// ============================================================
+let respawning=false;
+function onPlayerDeath(){
+  player.vel.set(0,0,0);
+  player.moveAccel=0;
+  player.impulse.set(0,0,0);
+  player.shieldUp=false;
+  player.aiming=false;
+  SFX.death();
+  let best=null,bestD=Infinity;
+  shrines.forEach(s=>{ if(!s.activated) return; const d=s.pos.distanceTo(player.pos); if(d<bestD){bestD=d;best=s;} });
+  $('deathHint').textContent = best ? `将在「${best.name}」复活` : '将在初始台地复活';
+  const ov=$('deathOverlay');
+  ov.style.display='flex';
+  ov.style.opacity='0';
+  requestAnimationFrame(()=>{ ov.style.opacity='1'; });
+}
+function respawnPlayer(){
+  if(player.state!=='dead'||respawning) return;
+  respawning=true;
+  ridingCycle=false; player.group.visible=true;
+  if(player.riding) dismountHorse(true);
+  let best=null,bestD=Infinity;
+  shrines.forEach(s=>{ if(!s.activated) return; const d=s.pos.distanceTo(player.pos); if(d<bestD){bestD=d;best=s;} });
+  const target=best||shrines.find(s=>s.type==='tutorial')||shrines[0];
+  const gx=target.pos.x, gz=target.pos.z+8, gy=terrainHeight(gx,gz);
+  playTeleportFX(player.pos.clone(),0x66ccff,1.2);
+  $('deathOverlay').style.display='none';
+  setTimeout(()=>{
+    player.pos.set(gx,gy+0.1,gz);
+    player.vel.set(0,0,0); player.impulse.set(0,0,0);
+    player.hp=player.maxHp;
+    player.stamina=player.maxStamina;
+    player.state='idle';
+    player.invuln=2.5;
+    player.yaw=Math.PI;
+    player.group.rotation.set(0,player.yaw,0);
+    player.group.position.copy(player.pos);
+    if(player.parts.visual) player.parts.visual.rotation.set(0,0,0);
+    if(player.parts.slope) player.parts.slope.rotation.set(0,0,0);
+    player.moveAccel=0;
+    updateHearts();
+    monsters.forEach(m=>{
+      if(m.type==='ganon'||m.type==='divineBoss') return;
+      if(m.state==='chase'||m.state==='attack'||m.state==='alert'||m.state==='combat'||m.state==='stagger'){
+        m.state='patrol'; m.alertLevel=0; m.staggerT=0; m.group.rotation.z=0;
+      }
+    });
+    camYaw=0; camPitch=0.28; camDist=9; player.camDistCur=9;
+    const camTarget=player.pos.clone().add(new THREE.Vector3(0,1.5,0));
+    camera.position.copy(camTarget.clone().add(new THREE.Vector3(0,Math.sin(camPitch),Math.cos(camPitch)).multiplyScalar(camDist)));
+    playTeleportFX(player.pos.clone(),0x88e0ff,1.2);
+    SFX.revive();
+    toast('在「'+target.name+'」复活');
+    respawning=false;
+  },600);
+}
+$('deathOverlay').addEventListener('click',()=>{ respawnPlayer(); });
+
+// ============================================================
+// 输入
+// ============================================================
+const keys={};
+let camYaw=-0.34,camPitch=0.14,camDist=8.5;
+function snapCameraToPlayer(){
+  const target=player.pos.clone().add(new THREE.Vector3(0,1.45,0));
+  const dir=new THREE.Vector3(
+    Math.sin(camYaw)*Math.cos(camPitch),
+    Math.sin(camPitch),
+    Math.cos(camYaw)*Math.cos(camPitch)
+  ).normalize();
+  camera.position.copy(target).addScaledVector(dir,camDist);
+  camera.lookAt(target);
+  player.camDistCur=camDist;
+}
+let pointerLocked=false;
+const canvas=renderer.domElement;
+
+$('startOverlay').addEventListener('click',()=>{
+  if(GAME_STARTED) return;
+  GAME_STARTED=true;
+  document.body.classList.add('playing');
+  initAudio(); startAmbient();
+  $('startOverlay').style.opacity='0'; $('startOverlay').style.pointerEvents='none';
+  setTimeout(()=>{ $('startOverlay').style.display='none'; },1000);
+  try{ const p=canvas.requestPointerLock(); if(p&&p.catch) p.catch(()=>{}); }catch(e){}
+  setTimeout(()=>{ try{ buildMapBase(); }catch(e){} }, 300);
+});
+canvas.addEventListener('click',()=>{
+  if(!pointerLocked&&$('startOverlay').style.display==='none'&&!mapOpen&&!invOpen&&!cookOpen&&player.state!=='dead') canvas.requestPointerLock();
+});
+document.addEventListener('pointerlockchange',()=>{ pointerLocked=document.pointerLockElement===canvas; });
+document.addEventListener('mousemove',e=>{
+  if(!pointerLocked) return;
+  camYaw-=e.movementX*0.0022; camPitch=clamp(camPitch+e.movementY*0.0018,-0.35,1.15);
+});
+canvas.addEventListener('contextmenu',e=>e.preventDefault());
+
+let attackHolding=false, attackHoldTime=0;
+document.addEventListener('mousedown',e=>{
+  if(!pointerLocked||mapOpen||invOpen||cookOpen||journalOpen||$('shrineOverlay').style.display==='flex') return;
+  if(player.state==='dead') return;
+  if(e.button===0){
+    if(heldProp){ endCarry(true); return; }
+    if(player.aiming){ shootArrow(); return; }
+    attackHolding=true; attackHoldTime=0;
+    tryAttack();
+  }
+  if(e.button===2){ if(!player.aiming) player.shieldUp=true; }
+});
+document.addEventListener('mouseup',e=>{
+  if(e.button===0){ attackHolding=false; attackHoldTime=0; }
+  if(e.button===2){ if(!keys['ShiftLeft']) player.shieldUp=false; }
+});
+document.addEventListener('wheel',e=>{ camDist=clamp(camDist+e.deltaY*0.01,4,30); },{passive:true});
+document.addEventListener('keydown',e=>{
+  if(player.state==='dead'){
+    if(e.code==='KeyE'||e.code==='Enter'||e.code==='Space'){ e.preventDefault(); respawnPlayer(); }
+    return;
+  }
+  keys[e.code]=true; if(e.code==='Space') e.preventDefault();
+  if(e.code==='KeyN'){
+    if(journalOpen) closeJournal();
+    else if(!dialogActive){ closeAllPanels(); openJournal(); }
+    return;
+  }
+  if(journalOpen){ if(e.code==='Escape') closeJournal(); return; }
+  if(e.code==='KeyM'){ if(mapOpen) closeMap(); else openMap(); return; }
+  if(e.code==='KeyI'){ if(invOpen) closeInventory(); else openInventory(); return; }
+  if(e.code==='KeyC'){ if(cookOpen) closeCook(); else openCook(); return; }
+  if(e.code==='KeyV'){ if($('compOverlay').style.display==='flex') closeCompendium(); else openCompendium(); return; }
+  if(e.code==='Tab'){ e.preventDefault(); cycleShield(); return; }
+  if(e.code==='Escape'){ closeAllPanels(); return; }
+  if(e.code==='KeyL'){
+    I18N.cycle();
+    const l=I18N.langs.find(x=>x.id===I18N.current);
+    toast(l?(l.nativeName||l.name):'');
+    return;
+  }
+  if(e.code==='F1'){ e.preventDefault(); toggleHelp(); return; }
+  if(e.code==='KeyJ'){ toggleJointDebug(); return; }
+  if(e.code==='KeyU'){ unstickPlayer(false); return; }
+  if(e.code==='KeyP'){
+    const fh=$('fpsHud');
+    if(fh){ fh.style.display = fh.style.display==='none' ? 'block' : 'none'; }
+    return;
+  }
+  if(e.code==='F2'){ e.preventDefault(); const modes=['auto','high','medium','low']; applyQuality(modes[(modes.indexOf(qualityMode)+1)%modes.length]); return; }
+  if(mapOpen||invOpen||cookOpen||$('compOverlay').style.display==='flex'||$('shrineOverlay').style.display==='flex') return;
+  if(e.shiftKey&&/^Digit[1-4]$/.test(e.code)){ quickEquipWeapon(Number(e.code.slice(5))-1); return; }
+  if(e.code==='KeyE') tryInteract();
+  if(e.code==='Digit1'){ activeRune=0; updateRuneUI(); toast('符文 · 遥控炸弹'); }
+  if(e.code==='Digit2'){ activeRune=1; updateRuneUI(); toast('符文 · 静止器'); }
+  if(e.code==='Digit3'){ activeRune=2; updateRuneUI(); toast('符文 · 磁力抓取'); }
+  if(e.code==='Digit4'){ activeRune=3; updateRuneUI(); toast('符文 · 制冰器'); }
+  if(e.code==='KeyQ') useRune();
+  if(e.code==='KeyT'&&heldProp){ endCarry(true); return; }
+  if(e.code==='KeyX'){ cycleArrow(); return; }
+  if(e.code==='KeyZ'){ if(quest.dlcMasterCycle){ summonMasterCycle(); } else toast('完成英杰之诗后可召唤大师摩托 Zero'); return; }
+  if(e.code==='KeyR') toggleAim();
+  if(e.code==='KeyG') useChampionSkill();
+  if(e.code==='KeyF') tryStealthAttack();
+  if(e.code==='KeyH') whistleHorse();
+});
+document.addEventListener('keyup',e=>{ keys[e.code]=false; if(e.code==='ShiftLeft') player.shieldUp=false; });
+
+function useRune(){
+  if(player.state==='dead') return;
+  const r=RUNES[activeRune];
+  if(r.cdLeft>0){ toast('符文冷却中'); return; }
+  r.cdLeft=r.cd;
+  if(r.id==='bomb') throwBomb();
+  else if(r.id==='stasis') useStasis();
+  else if(r.id==='magnesis') toggleMagnesis();
+  else if(r.id==='cryonis') useCryonis();
+  updateRuneUI();
+}
+function toggleAim(){ player.aiming=!player.aiming; $('crosshair').style.display=player.aiming?'block':'none'; if(player.aiming) player.shieldUp=false; }
+function quickEquipWeapon(slot){
+  if(!inventory.weapons.length){ toast('没有武器'); return; }
+  const list=inventory.weapons;
+  const item=list[clamp(slot,0,list.length-1)];
+  if(!item) return;
+  currentWeapon=item;
+  updateWeaponHUD(); toast('装备 · '+item.name);
+  SFX.loot&&SFX.loot();
+}
+function cycleShield(){
+  if(inventory.shields.length===0){ toast('没有盾牌'); return; }
+  const idx=inventory.shields.indexOf(currentShield);
+  const next=inventory.shields[(idx+1)%inventory.shields.length];
+  currentShield=next;
+  updateWeaponHUD();
+  toast('切换盾牌 · '+next.name);
+  player.parts.frontShield.visible=true;
+  setTimeout(()=>{ if(!player.shieldUp) player.parts.frontShield.visible=false; },300);
+}
+
+function tryStealthAttack(){
+  if(player.state==='dead') return;
+  if(player.attackTimer>0||player.rolling>0) return;
+  const fwd=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
+  monsters.forEach(m=>{
+    if(m.state==='dead') return;
+    const to=m.pos.clone().sub(player.pos); to.y=0;
+    const d=to.length();
+    if(d<2.8 && to.normalize().dot(fwd)>0.5){
+      const monsterFwd=new THREE.Vector3(Math.sin(m.group.rotation.y),0,Math.cos(m.group.rotation.y));
+      const behind=monsterFwd.dot(to.clone().negate())>0.5;
+      if(behind && m.alertLevel<2){
+        const dmg=Math.floor((currentWeapon?currentWeapon.atk:5)*8);
+        damageMonster(m,dmg,m.pos,true);
+        SFX.crit();
+        toast('偷袭！×8');
+      } else {
+        toast('正面攻击无法偷袭');
+      }
+    }
+  });
+}
+
+// ============================================================
+// 战斗
+// ============================================================
+const arrows=[];
+const slashArcs=[];
+function spawnSlashArc(combo){
+  const grp=new THREE.Group();
+  grp.position.copy(player.pos).add(new THREE.Vector3(0,1.2,0));
+  grp.rotation.y=player.yaw;
+  const inner=combo===3?1.0:1.2;
+  const outer=combo===3?2.6:3.2;
+  const arcLen=combo===2?Math.PI*0.55:Math.PI*0.7;
+  const geo=new THREE.RingGeometry(inner,outer,20,1,-Math.PI/2-arcLen/2,arcLen);
+  const col=combo===3?0xffcc66:0xffffff;
+  const mat=new THREE.MeshBasicMaterial({color:col,transparent:true,opacity:0.85,side:THREE.DoubleSide,depthWrite:false,blending:THREE.AdditiveBlending});
+  const ring=new THREE.Mesh(geo,mat);
+  ring.rotation.x=-Math.PI/2;
+  if(combo===2) ring.rotation.z=Math.PI*0.9;
+  grp.add(ring);
+  scene.add(grp);
+  slashArcs.push({grp,geo,mat,life:0.22,maxLife:0.22});
+}
+function updateSlashArcs(dt){
+  for(let i=slashArcs.length-1;i>=0;i--){
+    const s=slashArcs[i]; s.life-=dt;
+    const k=1-s.life/s.maxLife;
+    s.mat.opacity=0.85*(1-k);
+    s.grp.scale.setScalar(1+k*0.4);
+    if(s.life<=0){ scene.remove(s.grp); s.geo.dispose(); s.mat.dispose(); slashArcs.splice(i,1); }
+  }
+}
+function shootArrow(){
+  if(player.state==='dead') return;
+  if(player.arrowCD>0) return; player.arrowCD=0.38;
+  let t=getArrowDef();
+  if(!t.inf && (arrowInventory[t.id]||0)<=0){ currentArrow=0; t=getArrowDef(); toast('特殊箭矢已用尽 · 切换普通箭'); }
+  if(!t.inf) arrowInventory[t.id]=Math.max(0,(arrowInventory[t.id]||0)-1);
+  updateArrowHUD();
+  const geo=new THREE.CylinderGeometry(0.032,0.032,1.2,5); geo.rotateX(Math.PI/2);
+  const mat=new THREE.MeshStandardMaterial({color:t.id==='normal'?0x8a6a3a:t.color,roughness:0.35,
+    emissive:t.elem?t.color:0x000000,emissiveIntensity:t.elem?0.75:0});
+  const mesh=new THREE.Mesh(geo,mat);
+  const origin=player.pos.clone().add(new THREE.Vector3(0,player.riding?1.85:1.5,0));
+  const dir=new THREE.Vector3(); camera.getWorldDirection(dir);
+  mesh.position.copy(origin); mesh.lookAt(origin.clone().add(dir)); scene.add(mesh);
+  const tip=new THREE.Mesh(new THREE.SphereGeometry(t.id==='bomb'?0.12:0.055,6,5),
+    new THREE.MeshBasicMaterial({color:t.id==='bomb'?0x332222:t.color}));
+  tip.position.z=0.6; mesh.add(tip);
+  if(t.elem){
+    const light=new THREE.PointLight(t.color,1.4,5,2); light.position.z=0.3; mesh.add(light);
+  }
+  const dmg=(currentBow?currentBow.atk:20)*t.mult;
+  arrows.push({mesh,vel:dir.multiplyScalar(t.bomb?55:72),life:5,damage:dmg,elem:t.elem,
+    arrowType:t.id,ancient:!!t.ancient,bomb:!!t.bomb,trailT:0});
+  if(currentBow&&isFinite(currentBow.dur)){
+    currentBow.curDur--;
+    if(currentBow.curDur<=0){
+      toast('弓损坏了！'); SFX.break();
+      inventory.bows=inventory.bows.filter(b=>b!==currentBow);
+      currentBow=inventory.bows[0]||null;
+      updateWeaponHUD();
+    }
+  }
+  SFX.swing(); if(t.elem) SFX.rune();
+}
+function setAttackTiming(){
+  const t=currentWeapon?currentWeapon.type:'sword';
+  player.attackDur=t==='greatsword'?0.52:t==='spear'?0.40:0.36;
+}
+function tryAttack(){
+  if(player.state==='dead') return;
+  if(!currentWeapon) return;
+  setAttackTiming();
+  if(!player.onGround&&!player.riding){
+    player.vel.y=Math.min(player.vel.y,-14);
+    player.attackCombo=3;
+    player.attackTimer=player.attackDur;
+    doAttackHit();
+    return;
+  }
+  if(player.attackTimer>0){
+    if(player.attackTimer<player.attackDur*0.45&&player.attackCombo<3){
+      player.attackCombo++;
+      player.attackTimer=player.attackDur;
+      doAttackHit();
+    }
+    return;
+  }
+  if(player.stamina<0.08) return;
+  player.attackCombo=1;
+  player.attackTimer=player.attackDur;
+  player.stamina=Math.max(0,player.stamina-(currentWeapon.type==='greatsword'?0.09:0.06));
+  doAttackHit();
+}
+function doAttackHit(){
+  if(player.attackCombo===3){ SFX.swingHeavy(); }
+  else SFX.swing();
+  spawnSlashArc(player.attackCombo);
+  const fwd=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
+  const b=getArmorBonus();
+  const atkBuff=player.buffLevels.atk>0?(1+player.buffLevels.atk*0.2):1;
+  let baseAtk=(currentWeapon?currentWeapon.atk:5)*atkBuff*(b.atk||1);
+  if(player.flurryT>0) baseAtk*=1.35;
+  if(player.attackCombo===3) baseAtk*=1.8;
+  const wtype=currentWeapon?currentWeapon.type:'sword';
+  const reach=wtype==='spear'?4.9:wtype==='greatsword'?4.5:3.8;
+  let hitSomething=false;
+  monsters.forEach(m=>{
+    if(m.state==='dead') return;
+    const to=m.pos.clone().sub(player.pos); to.y=0;
+    const d=to.length();
+    if(d<reach&&to.normalize().dot(fwd)>0.32){
+      let finalAtk=baseAtk;
+      if(currentWeapon.elem==='fire'&&m.elem==='ice') finalAtk=9999;
+      if(currentWeapon.elem==='ice'&&m.elem==='fire') finalAtk=9999;
+      let isCrit=false;
+      if(m.weakPoint==='head'&&player.aiming){ finalAtk*=2; isCrit=true; }
+      if(m.type==='guardian'||m.type==='flyingGuardian'){
+        finalAtk*= (currentWeapon.id==='master_sword')?0.55:0.28;
+        if(m.stunT>0) finalAtk*=2.0;
+        if(b.guardianDmg) finalAtk*=b.guardianDmg;
+      }
+      if(m.type==='ganon') damageGanon(finalAtk,m.pos);
+      else if(m.type==='divineBoss') damageDivineBoss(m,finalAtk,m.pos);
+      else damageMonster(m,Math.floor(finalAtk*rand(0.9,1.1)),m.pos,isCrit);
+      if(currentWeapon.elem) applyElementalHit(m,currentWeapon.elem);
+      hitSomething=true;
+    }
+  });
+  if(hitSomething&&currentWeapon&&currentWeapon.elem==='fire'&&!player.swimming){
+    const fx=player.pos.x+Math.sin(player.yaw)*2.2, fz=player.pos.z+Math.cos(player.yaw)*2.2;
+    if(terrainSlope(fx,fz)<1.1) igniteGrassAt(fx,fz);
+  }
+  if(hitSomething&&currentWeapon&&isFinite(currentWeapon.dur)){
+    currentWeapon.curDur--;
+    if(currentWeapon.curDur<=0){
+      toast('武器损坏了！');
+      inventory.weapons=inventory.weapons.filter(w=>w!==currentWeapon);
+      currentWeapon=inventory.weapons[0]||null;
+      SFX.break(); updateWeaponHUD();
+    } else updateWeaponHUD();
+  }
+}
+function doSpinAttack(){
+  if(player.state==='dead') return;
+  if(!currentWeapon||player.stamina<0.25) return;
+  player.stamina-=0.25;
+  player.spinAttack=0.55;
+  SFX.swingHeavy();
+  const b=getArmorBonus();
+  const atkBuff=player.buffLevels.atk>0?(1+player.buffLevels.atk*0.2):1;
+  const baseAtk=(currentWeapon?currentWeapon.atk:5)*atkBuff*(b.atk||1)*2.2;
+  monsters.forEach(m=>{
+    if(m.state==='dead') return;
+    const d=m.pos.distanceTo(player.pos);
+    if(d<6.5){
+      let finalAtk=baseAtk*(1-d/8);
+      if(m.type==='guardian'||m.type==='flyingGuardian') finalAtk*=0.45;
+      if(m.type==='ganon') damageGanon(finalAtk,m.pos);
+      else if(m.type==='divineBoss') damageDivineBoss(m,finalAtk,m.pos);
+      else damageMonster(m,Math.floor(finalAtk),m.pos,true);
+      if(currentWeapon&&currentWeapon.elem) applyElementalHit(m,currentWeapon.elem);
+      m.staggerT=Math.max(m.staggerT||0,1.0);
+    }
+  });
+  for(let i=0;i<6;i++){
+    const ang=player.yaw+i*(Math.PI/3);
+    const px=player.pos.x+Math.sin(ang)*2.5, pz=player.pos.z+Math.cos(ang)*2.5;
+    emitParticles(sparkSys,px,player.pos.y+1.2,pz,15,5,0.4,new THREE.Color(0xffdd88));
+  }
+  toast('旋转斩！');
+}
+function damageMonster(m,dmg,hitPos,isCrit=false){
+  if(!m||m.state==='dead') return;
+  if(m.type==='mazKoshia'){ damageMazKoshia(m,dmg,hitPos,isCrit); return; }
+  if(m.type==='molduga'&&m.state==='lurk') dmg=Math.max(1,Math.floor(dmg*0.15));
+  if(m.type==='hinox'&&m.state==='sleeping'){ m.state='chase'; m.alertLevel=3; SFX.bossRoar(); }
+  m.hp-=dmg;
+  if(isCrit){ SFX.crit(); emitParticles(sparkSys,hitPos.x,hitPos.y+2,hitPos.z,40,8,0.6,new THREE.Color(0xff8844)); }
+  else { SFX.hit(); emitParticles(sparkSys,hitPos.x,hitPos.y+1.5,hitPos.z,25,7,0.5,new THREE.Color(0xffee88)); }
+  showDamageNumber(hitPos,dmg,isCrit);
+  if(m.type==='flyingGuardian'||m.type==='guardian'){
+    if(m.parts&&m.parts.eyeMat){
+      m.parts.eyeMat.emissiveIntensity=4.5;
+      setTimeout(()=>{ if(m.parts&&m.parts.eyeMat) m.parts.eyeMat.emissiveIntensity=2.0; },140);
+    }
+    if(m.parts&&m.parts.eyeLight) m.parts.eyeLight.intensity=5;
+  }
+  if(m.type==='guardian'||m.type==='flyingGuardian'){ m.stunT=Math.max(m.stunT||0,isCrit?0.9:0.2); }
+  m.staggerT=isCrit?0.8:0.35; m.state='stagger';
+  if(m.hp<=0){
+    m.hp=0; m.state='dead'; m.deadT=0;
+    emitParticles(fireSys,m.pos.x,m.pos.y+1.5,m.pos.z,50,7,1.2,new THREE.Color(0x884422));
+    if(m.type==='guardian'||m.type==='flyingGuardian') onGuardianDeath(m);
+    if(m.type==='kohga'){
+      quest.kohgaDefeated=true; hideBossBar();
+      emitParticles(fireSys,m.pos.x,m.pos.y+2,m.pos.z,100,10,1.3,new THREE.Color(0xcc3355));
+      setTimeout(()=>{ try{ startDialog('依盖队',['可盖大人被打败了……','依盖队暂时撤退了。','海拉鲁的沙漠恢复了平静。']); }catch(e){} },400);
+      renderJournal();
+    }
+    try{
+      if(m.type==='hinox'){ grantMaterial('hinox_tooth',1); grantMaterial('hearty_radish',2); }
+      else if(m.type==='molduga'){ grantMaterial('molduga_fin',1); grantMaterial('hydromelon',2); }
+      else if(m.type==='yiga'){ grantMaterial('mighty_bananas',randInt(1,3)); }
+      else if(m.type==='wizzrobe'){ grantMaterial(m.elem==='ice'?'hydromelon':m.elem==='thunder'?'voltfruit':'warm_safflina',2); }
+      else if(m.type==='lynel') grantMaterial('lynel_horn',1);
+      else if(m.type==='stoneTalus') grantMaterial('amber',randInt(1,2));
+      else if(m.type==='guardian') grantMaterial('guardian_gear',1);
+    }catch(e){}
+  }
+}
+function damageDivineBoss(boss,dmg,hitPos){
+  boss.hp-=dmg; SFX.hit(); emitParticles(sparkSys,hitPos.x,hitPos.y+2,hitPos.z,30,6,0.6,new THREE.Color(0xffee88));
+  showDamageNumber(hitPos,dmg); boss.staggerT=0.4; boss.state='stagger'; updateBossBar(boss);
+  if(boss.hp<=0) onDivineBossDefeated(boss);
+}
+function nearestMonsterTo(px,pz,maxD){
+  let best=null,bd=maxD;
+  for(const m of monsters){
+    if(m.state==='dead') continue;
+    const d=Math.hypot(m.pos.x-px,m.pos.z-pz);
+    if(d<bd){ bd=d; best=m; }
+  }
+  return best;
+}
+function triggerFlurryRush(){
+  player.flurryT=2.8;
+  player.dodgeT=0;
+  player.invuln=Math.max(player.invuln,0.35);
+  SFX.crit();
+  toast('完美闪避 · 突击');
+  emitParticles(sparkSys,player.pos.x,player.pos.y+1.2,player.pos.z,60,9,0.9,new THREE.Color(0xffdd66));
+  emitParticles(sparkSys,player.pos.x,player.pos.y+0.6,player.pos.z,30,5,0.6,new THREE.Color(0x88ccff));
+}
+function damagePlayer(dmg,kind=''){
+  if(player.state==='dead') return;
+  if(kind!=='env' && player.dodgeT>0 && player.flurryT<=0){ triggerFlurryRush(); return; }
+  if(player.flurryT>0){ player.invuln=Math.max(player.invuln,0.18); return; }
+  if(player.invuln>0) return;
+  if(player.darukCharges>0 && kind!=='env'){
+    player.darukCharges--;
+    player.invuln=Math.max(player.invuln,0.7);
+    emitParticles(sparkSys,player.pos.x,player.pos.y+1.3,player.pos.z,40,7,0.7,new THREE.Color(0xff8844));
+    const near=nearestMonsterTo(player.pos.x,player.pos.z,7.5);
+    if(near){ damageMonster(near,90,near.pos,true); near.staggerT=1.4; }
+    toast(player.darukCharges>0?('达尔克尔的守护 · '+player.darukCharges):'达尔克尔的守护 · 最后一道');
+    SFX.champion();
+    return;
+  }
+  const b=getArmorBonus();
+  if(kind==='guardian'&&b.guardianResist){ dmg*=1-b.guardianResist; }
+  if(kind==='fire'&&b.fire) return;
+  if(kind==='shock'&&b.shock) return;
+  if(player.shieldUp&&currentShield&&player.stamina>0.05&&(kind===''||kind==='melee')){
+    const perfect=(player.shieldRaiseT||9)<0.24;
+    if(perfect){
+      player.invuln=Math.max(player.invuln,0.35); player.stamina+=0.02;
+      const near=nearestMonsterTo(player.pos.x,player.pos.z,5.5);
+      if(near){ damageMonster(near,Math.floor((currentWeapon?currentWeapon.atk:10)*1.6),near.pos,true); near.staggerT=1.2; }
+      emitParticles(sparkSys,player.pos.x,player.pos.y+1.5,player.pos.z,45,8,0.7,new THREE.Color(0xaaddff));
+      toast('完美盾反！'); SFX.crit(); return;
+    }
+    currentShield.curDur-=3; player.stamina-=0.1;
+    if(currentShield.curDur<=0){
+      toast('盾牌损坏了！'); SFX.shieldBreak();
+      inventory.shields=inventory.shields.filter(s=>s!==currentShield);
+      currentShield=inventory.shields[0]||null;
+      updateWeaponHUD();
+    } else { SFX.shieldBlock(); }
+    emitParticles(sparkSys,player.pos.x,player.pos.y+1.5,player.pos.z,25,6,0.5,new THREE.Color(0x88aaff));
+    return;
+  }
+  const defBuff=player.buffLevels.def>0?(1-player.buffLevels.def*0.1):1;
+  const armorDef=currentArmor?currentArmor.def:0;
+  const armorMit=1-Math.min(0.55,armorDef*0.018);
+  // 怪物伤害以“点数”表示，玩家生命以“心”表示：这里换算成心
+  if(kind!=='env') dmg=Math.max(1,Math.round(dmg*0.25));
+  dmg=Math.max(1,Math.floor(dmg*defBuff*armorMit));
+  player.hp=Math.max(0,player.hp-dmg); player.invuln=0.8; player.hurtShake=0.25; SFX.hurt(); updateHearts();
+  if(player.hp<=0){
+    if(player.riding) dismountHorse(true);
+    const waterSkill=championSkills.find(s=>s.id==='water');
+    if(waterSkill&&waterSkill.cd<=0){
+      waterSkill.cd=waterSkill.cdMax; player.hp=player.maxHp+5; player.invuln=2.0; updateHearts();
+      playTeleportFX(player.pos.clone(),0x66ccff,1.5); toast('米法的祈福 · 林克复活了'); SFX.champion(); return;
+    }
+    player.state='dead'; toast('你倒下了…');
+  ridingCycle=false; player.group.visible=true;
+  onPlayerDeath();
+  }
+}
+
+function showDamageNumber(pos,dmg,isCrit){
+  const v=pos.clone().project(camera); const el=document.createElement('div');
+  el.className='dmg-num'+(isCrit?' crit':''); el.textContent=Math.floor(dmg);
+  el.style.left=((v.x*0.5+0.5)*innerWidth+rand(-20,20))+'px'; el.style.top=((-v.y*0.5+0.5)*innerHeight+rand(-12,12))+'px';
+  $('dmgLayer').appendChild(el); setTimeout(()=>el.remove(),800);
+}
+
+// ============================================================
+// 物理 + 攀爬（含子步进防穿模）
+// ============================================================
+const GRAVITY=26,WALK_SPEED=9.0,RUN_SPEED=18.0,SWIM_SPEED=6.0,CLIMB_SPEED=5.0;
+
+// ============================================================
+// 物理 + 攀爬 + 坡面贴合 + 骑马
+// ============================================================
+function terrainSlopeX(x,z){
+  const e=1.5;
+  return (terrainHeight(x+e,z)-terrainHeight(x-e,z))/(2*e);
+}
+function terrainSlopeZ(x,z){
+  const e=1.5;
+  return (terrainHeight(x,z+e)-terrainHeight(x,z-e))/(2*e);
+}
+function groundHeightAt(x,z,r=0.32){
+  let h=terrainHeight(x,z);
+  const d=r*0.78;
+  h=Math.max(h,
+    terrainHeight(x+d,z),terrainHeight(x-d,z),
+    terrainHeight(x,z+d),terrainHeight(x,z-d),
+    terrainHeight(x+d*0.7,z+d*0.7),terrainHeight(x-d*0.7,z-d*0.7),
+    terrainHeight(x+d*0.7,z-d*0.7),terrainHeight(x-d*0.7,z+d*0.7));
+  return h;
+}
+
+function resolveCollisions(){
+  const pr=0.38;
+  for(const c of collidables){
+    if(!c.radius) continue;
+    if(player.climbingObj===c) continue;
+    const pBot=player.pos.y+0.05;
+    const pTop=player.pos.y+1.68;
+    const oBot=c.pos.y;
+    const oTop=c.pos.y+c.height;
+    if(pTop<oBot+0.05||pBot>oTop-0.45) continue;
+    const dx=player.pos.x-c.pos.x, dz=player.pos.z-c.pos.z;
+    const d=Math.hypot(dx,dz);
+    const minD=c.radius+pr;
+    if(d<minD){
+      if(d>0.0001){
+        const push=minD-d;
+        player.pos.x+=(dx/d)*push;
+        player.pos.z+=(dz/d)*push;
+      } else {
+        player.pos.x+=minD;
+      }
+    }
+  }
+  // NPC 轻碰撞
+  for(const n of npcs){
+    const dx=player.pos.x-n.pos.x, dz=player.pos.z-n.pos.z;
+    const d=Math.hypot(dx,dz), minD=0.70;
+    if(d<minD&&d>0.001&&Math.abs(player.pos.y-n.pos.y)<1.9){
+      const push=(minD-d); player.pos.x+=(dx/d)*push; player.pos.z+=(dz/d)*push;
+    }
+  }
+  // 马匹 / 守护者实体碰撞，避免直接穿过模型
+  for(const h of horses){
+    if(h.ridden) continue;
+    const dx=player.pos.x-h.pos.x, dz=player.pos.z-h.pos.z;
+    const d=Math.hypot(dx,dz), minD=1.15;
+    if(d<minD&&d>0.001&&player.pos.y<h.pos.y+1.9&&player.pos.y>h.pos.y-0.3){
+      const push=(minD-d); player.pos.x+=(dx/d)*push; player.pos.z+=(dz/d)*push;
+    }
+  }
+  for(const m of monsters){
+    if(m.state==='dead') continue;
+    if(m.type==='guardian'){
+      if(m.variant==='decayed') continue;
+      const dx=player.pos.x-m.pos.x, dz=player.pos.z-m.pos.z;
+      const d=Math.hypot(dx,dz), minD=1.55;
+      if(d<minD&&d>0.001&&player.pos.y<m.pos.y+3.2){
+        const push=(minD-d); player.pos.x+=(dx/d)*push; player.pos.z+=(dz/d)*push;
+      }
+    } else if(m.type!=='flyingGuardian'&&m.type!=='ganon'&&m.type!=='divineBoss'){
+      const dx=player.pos.x-m.pos.x, dz=player.pos.z-m.pos.z;
+      const d=Math.hypot(dx,dz), minD=(m.radius||0.6)+0.30;
+      if(d<minD&&d>0.001&&player.pos.y<m.pos.y+1.9&&player.pos.y>m.pos.y-0.3){
+        const push=(minD-d); player.pos.x+=(dx/d)*push; player.pos.z+=(dz/d)*push;
+      }
+    }
+  }
+}
+
+let _staminaWheelCtx=null;
+// ============================================================
+// ★ 脱困（U 键 / 自动）：把角色推到最近的安全位置，避免卡进模型
+// ============================================================
+function unstickPlayer(quiet){
+  player.climbing=false; player.climbingObj=null; player.gliding=false; player.surfing=0;
+  let bx=player.pos.x, bz=player.pos.z;
+  for(const c of collidables){
+    if(!c.radius) continue;
+    const topY=c.pos.y+c.height;
+    if(player.pos.y>topY-0.35) continue;
+    const dx=bx-c.pos.x, dz=bz-c.pos.z;
+    const d=Math.hypot(dx,dz), minD=c.radius+0.55;
+    if(d<minD){
+      const nx=d>0.001?dx/d:1, nz=d>0.001?dz/d:0;
+      bx=c.pos.x+nx*minD; bz=c.pos.z+nz*minD;
+    }
+  }
+  const gy=groundHeightAt(bx,bz,0.34);
+  player.pos.x=bx; player.pos.z=bz;
+  player.pos.y=Math.max(gy+0.25, terrainHeight(bx,bz)+0.2, WATER_LEVEL-0.4);
+  player.vel.set(0,0,0); player.impulse.set(0,0,0); player.moveAccel=0;
+  player.onGround=true;
+  player.group.position.copy(player.pos);
+  if(!quiet) toast('已脱离卡住');
+}const _stamCache={pct:-1,riding:null,low:null,ex:null};
+function updateStaminaHUD(){
+  const riding=!!(player.riding&&activeHorse);
+  const ratio=riding?clamp(activeHorse.stamina/activeHorse.maxStamina,0,1):clamp(player.stamina/player.maxStamina,0,1);
+  const pct=Math.round(ratio*100);
+  const low=ratio<0.30&&!riding&&player.exhausted<=0;
+  const ex=!riding&&player.exhausted>0;
+  if(riding!==_stamCache.riding){
+    _stamCache.riding=riding;
+    const name=$('staminaName');
+    if(name) name.textContent=riding?'马匹精力':'精 力';
+  }
+  if(pct!==_stamCache.pct){
+    _stamCache.pct=pct;
+    const bar=$('staminaBar'); if(bar) bar.style.width=pct+'%';
+    const val=$('staminaVal'); if(val) val.textContent=pct;
+  }
+  if(low!==_stamCache.low||ex!==_stamCache.ex){
+    _stamCache.low=low; _stamCache.ex=ex;
+    const wrap=$('staminaWrap');
+    if(wrap){ wrap.classList.toggle('low',low); wrap.classList.toggle('exhausted',ex); }
+  }
+}
+const _wheelV=new THREE.Vector3();
+let _wheelT=0,_wheelRatio=-1,_wheelState='';
+function drawStaminaWheel(){
+  const cv=$('staminaWheel'); if(!cv) return;
+  if(!_staminaWheelCtx) _staminaWheelCtx=cv.getContext('2d');
+  if(dialogActive||mapOpen||invOpen||cookOpen||player.state==='dead'||teleporting){
+    cv.classList.remove('show'); return;
+  }
+  const now=performance.now();
+  if(now-_wheelT<33) return;
+  _wheelT=now;
+  const riding=player.riding&&activeHorse;
+  const ratio=riding?clamp(activeHorse.stamina/activeHorse.maxStamina,0,1):clamp(player.stamina/player.maxStamina,0,1);
+  const show = riding?false:(ratio<0.999 || player.climbing || player.gliding || player.surfing>0 || player.exhausted>0);
+  cv.classList.toggle('show',show);
+  if(!show){ _wheelRatio=-1; return; }
+  _wheelV.copy(player.pos); _wheelV.y+=1.15; _wheelV.project(camera);
+  if(_wheelV.z>1){ cv.classList.remove('show'); return; }
+  const x=(_wheelV.x*0.5+0.5)*innerWidth+62;
+  const y=(-_wheelV.y*0.5+0.5)*innerHeight-10;
+  cv.style.transform=`translate(${x-56}px,${y-56}px)`;
+  const stateKey=(player.exhausted>0?'e':'')+(ratio<0.3?'l':'')+(riding?'r':'');
+  if(Math.abs(ratio-_wheelRatio)<0.004 && stateKey===_wheelState) return;
+  _wheelRatio=ratio; _wheelState=stateKey;
+  const ctx=_staminaWheelCtx, W=cv.width, R=W/2;
+  ctx.clearRect(0,0,W,W);
+  ctx.save(); ctx.translate(R,R);
+  // 背景圆环
+  ctx.beginPath(); ctx.arc(0,0,R-14,0,Math.PI*2);
+  ctx.strokeStyle='rgba(6,12,8,.72)'; ctx.lineWidth=13; ctx.stroke();
+  // 外圈
+  ctx.beginPath(); ctx.arc(0,0,R-7,0,Math.PI*2);
+  ctx.strokeStyle='rgba(180,240,150,.18)'; ctx.lineWidth=1.2; ctx.stroke();
+  const col=(!riding&&player.exhausted>0)?['#ffb060','#d94a3a']:ratio<0.3?['#ffd060','#e35d36']:riding?['#ffe8a0','#c9a84c']:['#d8ff9a','#63c24a'];
+  const grad=ctx.createLinearGradient(-R,0,R,0); grad.addColorStop(0,col[1]); grad.addColorStop(1,col[0]);
+  ctx.beginPath(); ctx.arc(0,0,R-14,-Math.PI/2,-Math.PI/2+Math.PI*2*ratio);
+  ctx.strokeStyle=grad; ctx.lineWidth=11; ctx.lineCap='round'; ctx.stroke();
+  // 内侧刻度
+  for(let i=0;i<12;i++){
+    const a=-Math.PI/2+i*Math.PI*2/12;
+    const r1=R-25,r2=R-20;
+    ctx.beginPath(); ctx.moveTo(Math.cos(a)*r1,Math.sin(a)*r1); ctx.lineTo(Math.cos(a)*r2,Math.sin(a)*r2);
+    ctx.strokeStyle='rgba(220,255,200,.20)'; ctx.lineWidth=1; ctx.stroke();
+  }
+  ctx.beginPath(); ctx.arc(0,0,R-29,0,Math.PI*2);
+  ctx.fillStyle='rgba(4,10,6,.55)'; ctx.fill();
+  ctx.fillStyle=ratio<0.3?'#ffd0a0':'#d8f0c0'; ctx.font='bold 15px Georgia,serif'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText(Math.round(ratio*100),0,1);
+  ctx.restore();
+}
+
+function updatePlayer(dt){
+  if(player.state==='dead'){ animatePlayer(dt,false,false); return; }
+  if(teleporting){ animatePlayer(dt,false,false); return; }
+  if(ridingCycle){ updateCycleRiding(dt); return; }
+
+  player.invuln=Math.max(0,player.invuln-dt);
+  player.attackTimer=Math.max(0,player.attackTimer-dt);
+  if(player.attackTimer<=0) player.attackCombo=0;
+  player.rolling=Math.max(0,player.rolling-dt);
+  player.arrowCD=Math.max(0,player.arrowCD-dt);
+  player.climbJumpCD=Math.max(0,player.climbJumpCD-dt);
+  player.surfing=Math.max(0,player.surfing-dt);
+  player.spinAttack=Math.max(0,(player.spinAttack||0)-dt);
+  player.landT=Math.max(0,(player.landT||0)-dt);
+  player.exhausted=Math.max(0,player.exhausted-dt);
+  player.dodgeT=Math.max(0,(player.dodgeT||0)-dt);
+  player.flurryT=Math.max(0,(player.flurryT||0)-dt);
+  player.darukT=Math.max(0,(player.darukT||0)-dt);
+  if(player.darukT<=0) player.darukCharges=0;
+  player.galeT=Math.max(0,(player.galeT||0)-dt);
+  player.shieldRaiseT=player.shieldUp?((player.shieldRaiseT||0)+dt):0;
+  RUNES.forEach(r=>r.cdLeft=Math.max(0,r.cdLeft-dt));
+  player.atkBuff=Math.max(0,player.atkBuff-dt);
+  player.defBuff=Math.max(0,player.defBuff-dt);
+  player.speedBuff=Math.max(0,player.speedBuff-dt);
+  player.stealthBuff=Math.max(0,player.stealthBuff-dt);
+  if(player.atkBuff<=0) player.buffLevels.atk=0;
+  if(player.defBuff<=0) player.buffLevels.def=0;
+  if(player.speedBuff<=0) player.buffLevels.spd=0;
+  player.wet=Math.max(0,player.wet-dt);
+  if(player.cold<0) player.cold=Math.min(0,player.cold+dt);
+  if(player.heat<0) player.heat=Math.min(0,player.heat+dt);
+
+  if(player.riding){ updateRiding(dt); updateStaminaHUD(); updateInteractHint(); return; }
+
+  const bonus=getArmorBonus();
+  const climbMul=bonus.climb||1;
+  const climbCost=bonus.climbStam||1;
+  const swimMul=bonus.swim||1;
+  const glideCost=bonus.glide||1;
+
+  if(attackHolding){
+    attackHoldTime+=dt;
+    if(attackHoldTime>0.5&&player.attackTimer<=0&&player.stamina>0.25&&player.exhausted<=0){
+      attackHoldTime=0;
+      doSpinAttack();
+      attackHolding=false;
+    }
+  }
+
+  const shieldUp=player.shieldUp&&!!currentShield;
+  player.parts.frontShield.visible=shieldUp;
+  player.parts.backShield.visible=!shieldUp&&!!currentShield;
+  player.parts.weaponRoot.visible=!!currentWeapon&&!shieldUp;
+  player.parts.bowBack.visible=!player.aiming;
+  player.parts.bowHand.visible=player.aiming;
+  player.parts.surfBoard.visible=player.surfing>0;
+
+  const camFwd=new THREE.Vector3(-Math.sin(camYaw),0,-Math.cos(camYaw)).normalize();
+  const camRight=new THREE.Vector3(camFwd.z,0,-camFwd.x);
+  let ix=0,iz=0;
+  if(keys['KeyW']) iz-=1; if(keys['KeyS']) iz+=1; if(keys['KeyA']) ix-=1; if(keys['KeyD']) ix+=1;
+  const moving=(ix!==0||iz!==0);
+  const wantRun=keys['ShiftLeft']&&!player.aiming&&player.exhausted<=0;
+  const run=wantRun&&moving;
+
+  if(moving&&!player.aiming){
+    const moveDir=camFwd.clone().multiplyScalar(-iz).add(camRight.clone().multiplyScalar(ix)).normalize();
+    player.yaw=Math.atan2(moveDir.x,moveDir.z);
+  } else if(player.aiming){ player.yaw=camYaw+Math.PI; }
+
+  const inWater=isWater(player.pos.x,player.pos.z)&&player.pos.y<WATER_LEVEL-0.45;
+  player.swimming=inWater; if(inWater) player.wet=4;
+  const wasGrounded=player.onGround;
+
+  // 攀爬表面
+  let climbSurface=null;
+  if(!inWater&&player.stamina>0.03&&!player.aiming&&player.exhausted<=0){
+    const fwd2=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
+    const aheadX=player.pos.x+fwd2.x*1.0, aheadZ=player.pos.z+fwd2.z*1.0;
+    const th=groundHeightAt(aheadX,aheadZ,0.25);
+    if(th>player.pos.y+0.6&&th<player.pos.y+6.0) climbSurface={type:'terrain',topY:th};
+    if(!climbSurface){
+      for(const c of collidables){
+        if(!c.climbable) continue;
+        const dx=player.pos.x-c.pos.x, dz=player.pos.z-c.pos.z;
+        const dist=Math.hypot(dx,dz);
+        const reach=(c.type==='castle'||c.type==='stable'||c.type==='house'||c.type==='tower'||c.type==='windmill')?c.radius+1.3:c.radius+1.0;
+        if(dist<reach&&dist>Math.max(0.1,c.radius-0.8)){
+          const topY=c.pos.y+c.height;
+          if(player.pos.y<topY-0.5){ climbSurface={type:'object',obj:c,topY}; break; }
+        }
+      }
+    }
+  }
+  const wantClimb=climbSurface&&moving&&(keys['KeyW']||keys['ArrowUp'])&&!keys['ShiftLeft']&&player.exhausted<=0;
+  player.climbing=!!wantClimb;
+  player.climbingObj=climbSurface&&climbSurface.type==='object'?climbSurface.obj:null;
+
+  if(player.climbing&&keys['Space']&&player.climbJumpCD<=0&&player.stamina>0.12){
+    player.climbJumpCD=0.45;
+    player.pos.y+=1.6;
+    player.stamina-=0.12;
+    keys['Space']=false;
+    SFX.jump();
+    emitParticles(sparkSys,player.pos.x,player.pos.y+0.5,player.pos.z,8,2,0.4,new THREE.Color(0xccffcc));
+  }
+
+  if(!player.climbing&&player.shieldUp&&keys['Space']&&player.onGround&&!player.aiming&&player.surfing<=0&&player.stamina>0.1&&player.moveAccel>4&&player.exhausted<=0){
+    player.surfing=0.9;
+    player.stamina-=0.1;
+    keys['Space']=false;
+    SFX.surf();
+    toast('盾滑！');
+  }
+  if(player.surfing>0){
+    const dir=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
+    player.impulse.add(dir.multiplyScalar(10));
+    player.stamina-=dt*0.12;
+    if(player.stamina<=0){ player.surfing=0; player.exhausted=1.4; }
+    if(Math.random()<dt*20) emitParticles(sparkSys,player.pos.x,player.pos.y+0.2,player.pos.z,3,3,0.3,new THREE.Color(0xaaeeff));
+  }
+
+  if(!player.climbing&&player.aiming&&keys['Space']&&player.onGround){
+    const back=new THREE.Vector3(-Math.sin(player.yaw),0,-Math.cos(player.yaw));
+    player.impulse.add(back.multiplyScalar(20));
+    player.vel.y=8; player.onGround=false; player.dodgeT=0.48; keys['Space']=false; SFX.jump();
+  }
+
+  if(keys['Space']&&player.onGround&&!player.attackTimer&&!player.climbing&&!player.shieldUp&&!player.aiming){
+    if(keys['ShiftLeft']&&player.stamina>0.15&&player.exhausted<=0){
+      player.rolling=0.5; player.stamina-=0.15; player.vel.y=4; player.dodgeT=0.48; keys['Space']=false; SFX.roll();
+    } else {
+      player.vel.y=11; player.onGround=false; keys['Space']=false; SFX.jump();
+      emitParticles(sparkSys,player.pos.x,player.pos.y+0.15,player.pos.z,8,2,0.35,new THREE.Color(0xd8c8a0));
+    }
+  }
+
+  if(player.climbing&&climbSurface){
+    player.vel.y=0;
+    if(climbSurface.type==='terrain'){
+      player.pos.y+=CLIMB_SPEED*climbMul*dt;
+      const fwd3=new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw));
+      player.pos.x+=fwd3.x*0.5*dt; player.pos.z+=fwd3.z*0.5*dt;
+      player.stamina-=dt*0.20*climbCost;
+      if(player.stamina<=0){ player.climbing=false; player.exhausted=1.4; toast('精力耗尽'); }
+    } else {
+      const c=climbSurface.obj;
+      player.pos.y+=CLIMB_SPEED*climbMul*dt;
+      const dx=player.pos.x-c.pos.x, dz=player.pos.z-c.pos.z;
+      const d=Math.hypot(dx,dz)||0.001;
+      const keepD=c.radius+0.35;
+      player.pos.x=c.pos.x+(dx/d)*keepD;
+      player.pos.z=c.pos.z+(dz/d)*keepD;
+      player.yaw=Math.atan2(-dx,-dz);
+      player.group.rotation.y=player.yaw;
+      player.stamina-=dt*0.22*climbCost;
+      if(player.pos.y>=climbSurface.topY-0.15){
+        player.pos.y=climbSurface.topY+0.05;
+        const innerD=Math.max(0,c.radius-0.6);
+        player.pos.x=c.pos.x+(dx/d)*innerD;
+        player.pos.z=c.pos.z+(dz/d)*innerD;
+        player.climbing=false; player.onGround=true;
+        player.stamina=Math.max(0,player.stamina-0.05);
+        SFX.footstep(); toast('攀爬成功');
+      }
+      if(player.stamina<=0){ player.climbing=false; player.exhausted=1.4; toast('精力耗尽'); }
+    }
+  }
+
+  let targetSpeed=inWater?SWIM_SPEED*swimMul:player.climbing?0:(run&&player.stamina>0.02)?RUN_SPEED:WALK_SPEED;
+  if(player.buffLevels.spd>0) targetSpeed*=1+player.buffLevels.spd*0.15;
+  const accel=moving?12:18;
+  player.moveAccel=lerp(player.moveAccel,(moving&&!player.climbing)?targetSpeed:0,1-Math.exp(-accel*dt));
+
+  const moveVec=new THREE.Vector3();
+  if(moving&&!player.attackTimer&&!player.rolling&&!player.climbing){
+    const dir=camFwd.clone().multiplyScalar(-iz).add(camRight.clone().multiplyScalar(ix)).normalize();
+    moveVec.copy(dir).multiplyScalar(player.moveAccel);
+  }
+  if(player.attackTimer>0) moveVec.multiplyScalar(0.15);
+  if(player.rolling>0) moveVec.copy(new THREE.Vector3(Math.sin(player.yaw),0,Math.cos(player.yaw)).multiplyScalar(22));
+  moveVec.add(player.impulse);
+  player.impulse.multiplyScalar(Math.exp(-6*dt));
+  if(player.impulse.length()<0.1) player.impulse.set(0,0,0);
+
+  if(!player.climbing) player.vel.y-=GRAVITY*dt;
+  if(player.galeT>0&&!player.onGround&&!player.climbing){ player.vel.y=Math.max(player.vel.y,3.4); if(Math.random()<dt*28) emitParticles(sparkSys,player.pos.x+rand(-1,1),player.pos.y+rand(0,2),player.pos.z+rand(-1,1),4,3,0.6,new THREE.Color(0xccffbb)); }
+  if(inWater&&player.pos.y<WATER_LEVEL-0.8) player.vel.y+=20*dt;
+  if(!player.onGround&&keys['Space']&&player.vel.y<0&&player.stamina>0.04&&!player.climbing&&!player.aiming&&player.exhausted<=0){
+    player.gliding=true; player.vel.y=Math.max(player.vel.y,-3.0); player.stamina-=dt*0.12*glideCost;
+    if(player.stamina<=0){ player.gliding=false; player.exhausted=1.4; toast('精力耗尽'); }
+  } else player.gliding=false;
+
+  // 子步进位移 + 每步碰撞，防止高速穿模
+  if(!player.climbing){
+    const totalX=moveVec.x*dt, totalZ=moveVec.z*dt;
+    const steps=Math.max(1,Math.ceil(Math.hypot(totalX,totalZ)/0.35));
+    const sx=totalX/steps, sz=totalZ/steps;
+    for(let s=0;s<steps;s++){
+      player.pos.x+=sx; player.pos.z+=sz;
+      resolveCollisions();
+    }
+    player.pos.y+=player.vel.y*dt;
+    if(player.vel.y<0) resolveCollisions();
+  }
+  const margin=30;
+  player.pos.x=clamp(player.pos.x,-HALF_X+margin,HALF_X-margin);
+  player.pos.z=clamp(player.pos.z,-HALF_Z+margin,HALF_Z-margin);
+
+  // 地面高度：多点采样，避免斜坡/台阶穿模
+  const groundH=groundHeightAt(player.pos.x,player.pos.z,0.34);
+  let floor=groundH;
+  for(const w of walkSurfaces){
+    const dx=player.pos.x-w.x, dz=player.pos.z-w.z;
+    const lx=dx*Math.cos(-w.angle)-dz*Math.sin(-w.angle);
+    const lz=dx*Math.sin(-w.angle)+dz*Math.cos(-w.angle);
+    if(Math.abs(lx)<w.halfL&&Math.abs(lz)<w.halfW&&player.pos.y>w.y-0.9&&player.pos.y<w.y+3.0) floor=Math.max(floor,w.y);
+  }
+  if(inWater) floor=Math.max(floor,WATER_LEVEL-0.6);
+  iceBlocks.forEach(b=>{ if(Math.abs(b.mesh.position.x-player.pos.x)<2&&Math.abs(b.mesh.position.z-player.pos.z)<2&&player.pos.y>b.mesh.position.y-0.8) floor=Math.max(floor,b.topY||(b.mesh.position.y+1.0)); });
+  let topFloor=null;
+  for(const c of collidables){
+    if(!c.climbable) continue;
+    const dx=Math.abs(player.pos.x-c.pos.x), dz=Math.abs(player.pos.z-c.pos.z);
+    const topY=c.pos.y+c.height;
+    if(dx<c.radius*0.8&&dz<c.radius*0.8&&player.pos.y>=topY-0.6&&player.pos.y<topY+1.0){
+      if(topFloor===null||topY>topFloor) topFloor=topY;
+    }
+  }
+  if(topFloor!==null) floor=Math.max(floor,topFloor);
+
+  if(!player.climbing){
+    const fallSpeed=player.vel.y;
+    if(player.pos.y<=floor){
+      if(!player.onGround&&fallSpeed<-5.5){
+        player.landT=0.20;
+        emitParticles(sparkSys,player.pos.x,player.pos.y+0.1,player.pos.z,14,3,0.4,new THREE.Color(0xc8b898));
+        SFX.footstep();
+      }
+      player.pos.y=floor; player.vel.y=0; player.onGround=true;
+      if(inWater){ player.onGround=false; player.vel.y=Math.max(player.vel.y,0); }
+    } else if(wasGrounded&&player.vel.y<=0&&player.pos.y-floor<0.90&&!inWater){
+      // 下坡贴地，避免高速奔跑时变成“漂浮”
+      player.pos.y=floor; player.vel.y=0; player.onGround=true;
+    } else player.onGround=false;
+  }
+
+  // 坡面贴合（只影响视觉，不影响碰撞体积）
+  if(player.parts.slope){
+    const targetX=player.onGround&&!player.climbing&&!inWater?clamp(-Math.atan(terrainSlopeZ(player.pos.x,player.pos.z)),-0.40,0.40):0;
+    const targetZ=player.onGround&&!player.climbing&&!inWater?clamp(Math.atan(terrainSlopeX(player.pos.x,player.pos.z)),-0.40,0.40):0;
+    const k=1-Math.exp(-8*dt);
+    player.parts.slope.rotation.x=lerp(player.parts.slope.rotation.x,targetX,k);
+    player.parts.slope.rotation.z=lerp(player.parts.slope.rotation.z,targetZ,k);
+  }
+
+  // 精力
+  if(run&&moving&&player.onGround&&!inWater&&!player.climbing){
+    player.stamina-=dt*0.105;
+    if(player.stamina<=0){ player.stamina=0; player.exhausted=1.4; toast('精力耗尽，无法冲刺'); }
+  }
+  if(!player.climbing&&!player.gliding&&!player.surfing&&!run&&!inWater) player.stamina=Math.min(player.maxStamina,player.stamina+dt*(player.exhausted>0?0.18:0.30));
+  if(inWater) player.stamina=Math.min(player.maxStamina,player.stamina+dt*0.12);
+  if(moving&&player.onGround&&!inWater&&!player.climbing){ player.lastFootstep-=dt; if(player.lastFootstep<=0){ SFX.footstep(); player.lastFootstep=run?0.28:0.45; } }
+
+  player.bulletTime=!!(player.aiming&&!player.onGround&&!player.climbing&&!player.gliding&&!player.riding&&player.stamina>0.03);
+  if(player.bulletTime){ player.stamina=Math.max(0,player.stamina-dt*0.15); if(player.stamina<=0) player.bulletTime=false; }
+  player.group.position.copy(player.pos);
+  // 自动脱困：长时间嵌在建筑/岩石里时把角色推到安全位置
+  player.stuckT=(player.stuckT||0)+dt;
+  if(player.stuckT>1.0){
+    player.stuckT=0;
+    if(moving&&!player.climbing){
+      for(const c of collidables){
+        if(!c.radius) continue;
+        if(player.pos.y>c.pos.y+c.height-0.35) continue;
+        const dx=player.pos.x-c.pos.x, dz=player.pos.z-c.pos.z;
+        if(Math.hypot(dx,dz)<c.radius*0.55){ unstickPlayer(true); break; }
+      }
+    }
+  }
+  if(!player.climbing) player.group.rotation.y=player.yaw;
+  animatePlayer(dt,moving,run);
+  if(inWater&&moving&&Math.random()<dt*12) emitParticles(waterSys,player.pos.x,WATER_LEVEL,player.pos.z,4,2,0.6,new THREE.Color(0xbbddff));
+
+  updateStaminaHUD();
+  updateRuneCooldowns();
+  player.parts.weaponRoot.visible=!!currentWeapon&&!shieldUp;
+  updateChampionSkills(dt);
+  updateInteractHint();
+}
+
+// ============================================================
+// 角色动画（含待机/受击抖动）
+// ============================================================
+// ============================================================
+// 角色动画（骑马 / 攀爬 / 滑翔 / 三段连击 / 二次动态）
+// ============================================================
+function animatePlayer(dt, moving, run){
+  const p=player.parts;
+  if(!p||!p.visual) return;
+  const now=performance.now()*0.001;
+
+  let rootX=0,rootY=0,rootZ=0,spinY=0;
+  let visX=0,visY=0,visZ=0;
+  let chestX=0,chestY=0,chestZ=0;
+  let headX=0,headY=0,headZ=0;
+  let armLX=0.04,armLY=0,armLZ=0.17;
+  let armRX=-0.04,armRY=0,armRZ=-0.17;
+  let elbL=0.12,elbR=0.12;
+  let legLX=0,legLZ=0.04,legRX=0,legRZ=-0.04;
+  let kneeL=0.05,kneeR=0.05;
+  let swordX=-0.35,swordY=0.05,swordZ=0.10;
+  let tailX=0.55,tailZ=0;
+  let capeX=0.14,capeZ=0;
+  let scarfX=0.05;
+  let gliderOpen=0;
+  let skirtSwing=0;
+
+  // 死亡
+  if(player.state==='dead'){
+    p.visual.rotation.x=lerp(p.visual.rotation.x,-Math.PI/2,1-Math.exp(-4*dt));
+    p.visual.rotation.z=lerp(p.visual.rotation.z,0.18,1-Math.exp(-3*dt));
+    p.visual.position.y=lerp(p.visual.position.y,-0.10,1-Math.exp(-3*dt));
+    p.armL.pivot.rotation.x=lerp(p.armL.pivot.rotation.x,-0.5,1-Math.exp(-3*dt));
+    p.armR.pivot.rotation.x=lerp(p.armR.pivot.rotation.x,0.4,1-Math.exp(-3*dt));
+    p.paraglider.visible=false; p.surfBoard.visible=false;
+    p.weaponRoot.visible=false;
+    return;
+  }
+
+  const cycleFreq=player.swimming?5:player.climbing?4.5:run?12.5:8;
+  player.animPhase+=dt*cycleFreq*(moving?clamp(player.moveAccel/WALK_SPEED,0.55,1.7):0);
+  const phase=player.animPhase;
+  const speedK=clamp(player.moveAccel/RUN_SPEED,0,1);
+
+  // 受击抖动
+  if(player.hurtShake>0){
+    const k=player.hurtShake/0.25;
+    visX+=rand(-0.05,0.05)*k;
+    visZ+=rand(-0.04,0.04)*k;
+    chestX+=rand(-0.05,0.05)*k;
+    headZ+=rand(-0.06,0.06)*k;
+  }
+
+  // 落地缓冲
+  if(player.landT>0){
+    const k=player.landT/0.20;
+    visY-=0.12*k;
+    kneeL+=1.1*k; kneeR+=1.1*k;
+    legLX-=0.35*k; legRX-=0.35*k;
+    chestX+=0.20*k;
+    armLX-=0.35*k; armRX-=0.35*k; armLZ+=0.30*k; armRZ-=0.30*k;
+  }
+
+  if(player.riding){
+    // ---------- 骑乘 ----------
+    const h=activeHorse;
+    const spd=h?Math.abs(h.speed):0;
+    const bounce=Math.sin((h?h.phase:now*4))*clamp(spd/20,0,1)*0.035;
+    visY+=bounce;
+    legLX=-1.18; legRX=-1.18;
+    legLZ=-1.02; legRZ=1.02;
+    kneeL=1.52; kneeR=1.52;
+    chestX=0.08; chestY=-0.04;
+    headX=-0.05;
+    armLX=-0.72; armRX=-0.72;
+    armLZ=-0.16; armRZ=0.16;
+    elbL=0.62; elbR=0.62;
+    swordX=-0.95; swordY=0.15; swordZ=0.32;
+    tailX=0.45; tailZ=Math.sin(now*2.2)*0.10;
+    capeX=0.30+clamp(spd/20,0,1)*0.55; capeZ=Math.sin(now*3.1)*0.06;
+    scarfX=0.2+clamp(spd/20,0,1)*0.5;
+    skirtSwing=-0.20;
+    // 骑乘攻击
+    if(player.attackTimer>0){ applyAttackPose(player.attackCombo,1-player.attackTimer/player.attackDur); }
+    // 骑乘瞄准
+    if(player.aiming){
+      armLX=-1.55; armLZ=-0.08; elbL=0.25;
+      armRX=-1.25; armRZ=-0.45; elbR=1.05;
+      chestY=-0.18; headY=-0.10;
+      swordX=-1.2;
+    } else if(player.shieldUp&&currentShield){
+      armLX=-1.48; armLZ=0.72; elbL=0.62;
+      armRX=0.35; armRZ=-0.10; elbR=0.35;
+      chestX=0.14; chestY=0.10;
+    }
+  }
+  else if(player.spinAttack>0){
+    const k=1-player.spinAttack/0.55;
+    spinY=k*Math.PI*4;
+    armLX=-1.45; armRX=-1.45; armLZ=0.85; armRZ=-0.85;
+    elbL=0.25; elbR=0.25;
+    legLX=-0.15; legRX=0.15;
+    chestX=0.10;
+  }
+  else if(player.attackTimer>0){
+    // ---------- 连击 ----------
+    applyAttackPose(player.attackCombo,1-player.attackTimer/player.attackDur);
+  }
+  else if(player.climbing){
+    // ---------- 攀爬 ----------
+    const c=Math.sin(phase)*0.75;
+    armLX=-2.05+c; armRX=-2.05-c;
+    armLZ=-0.30; armRZ=0.30;
+    elbL=0.35; elbR=0.35;
+    legLX=-0.35-c*0.55; legRX=-0.35+c*0.55;
+    legLZ=0.28; legRZ=-0.28;
+    kneeL=0.85; kneeR=0.85;
+    chestX=0.20; headX=-0.28;
+    tailX=0.75; tailZ=Math.sin(now*2.3)*0.08;
+    capeX=-0.05;
+    visY=Math.sin(phase*2)*0.015;
+  }
+  else if(player.shieldUp&&currentShield){
+    // ---------- 举盾 ----------
+    armLX=-1.48; armLZ=0.72; elbL=0.62;
+    armRX=0.35; armRZ=-0.10; elbR=0.35;
+    chestX=0.16; chestY=0.12;
+    headX=-0.05;
+    legLX=-0.15; legRX=0.10;
+    kneeL=0.28; kneeR=0.20;
+    swordX=-0.2;
+    capeX=0.20;
+  }
+  else if(player.aiming){
+    // ---------- 瞄准 ----------
+    armLX=-1.52; armLZ=-0.06; elbL=0.18;
+    armRX=-1.40; armRZ=-0.42; elbR=1.10;
+    chestX=0.04; chestY=-0.16;
+    headY=-0.10; headX=0.02;
+    legLX=-0.10; legRX=0.12;
+    kneeL=0.18; kneeR=0.14;
+    swordX=-0.5;
+    tailX=0.52; tailZ=-0.05;
+  }
+  else if(player.swimming){
+    // ---------- 游泳 ----------
+    rootX=1.18; visY=0.30+Math.sin(now*2.4)*0.03;
+    const sw=Math.sin(phase);
+    armLX=-1.35+sw*0.85; armRX=-1.35-sw*0.85;
+    armLZ=-0.35; armRZ=0.35;
+    elbL=0.45; elbR=0.45;
+    legLX=sw*0.55; legRX=-sw*0.55;
+    kneeL=0.35; kneeR=0.35;
+    chestX=0.12; headX=-0.75;
+    tailX=0.2; tailZ=Math.sin(now*3)*0.15;
+    capeX=-0.35;
+  }
+  else if(player.gliding){
+    // ---------- 滑翔 ----------
+    rootX=0.28;
+    visY=0.22;
+    armLX=-2.85; armRX=-2.85;
+    armLZ=-0.12; armRZ=0.12;
+    elbL=0.18; elbR=0.18;
+    legLX=0.25; legRX=-0.15;
+    legLZ=0.18; legRZ=-0.18;
+    kneeL=0.55; kneeR=0.65;
+    chestX=-0.10; headX=0.18;
+    gliderOpen=1;
+    tailX=0.35+Math.sin(now*4)*0.08;
+    capeX=0.55+Math.sin(now*3.2)*0.10;
+    scarfX=0.5;
+  }
+  else if(player.surfing>0){
+    // ---------- 盾滑 ----------
+    visY=-0.10;
+    chestX=0.22; chestY=0.12;
+    armLX=-0.45; armRX=1.05;
+    armLZ=-0.55; armRZ=0.35;
+    elbL=0.45; elbR=0.25;
+    legLX=-0.55; legRX=-0.30;
+    legLZ=0.20; legRZ=-0.20;
+    kneeL=1.05; kneeR=0.85;
+    headX=-0.08;
+    capeX=0.55; scarfX=0.5;
+    tailX=0.35;
+  }
+  else if(!player.onGround){
+    // ---------- 空中 ----------
+    if(player.vel.y>0){
+      visY=0.02;
+      armLX=-0.55; armRX=-0.55;
+      armLZ=-0.55; armRZ=0.55;
+      elbL=0.45; elbR=0.45;
+      legLX=-0.55; legRX=-0.15;
+      kneeL=0.95; kneeR=0.55;
+      chestX=0.12; headX=-0.10;
+      tailX=0.75;
+    } else {
+      armLX=-0.35; armRX=-0.35;
+      armLZ=-0.95; armRZ=0.95;
+      elbL=0.35; elbR=0.35;
+      legLX=0.15; legRX=-0.35;
+      kneeL=0.45; kneeR=0.75;
+      chestX=0.18; headX=0.15;
+      tailX=0.35;
+      capeX=0.45;
+    }
+  }
+  else if(moving){
+    // ---------- 行走 / 奔跑 ----------
+    const amp=run?0.78:0.46;
+    const armAmp=run?0.82:0.42;
+    const sw=Math.sin(phase);
+    legLX=sw*amp; legRX=-sw*amp;
+    legLZ=0.03; legRZ=-0.03;
+    kneeL=Math.max(0,sw)* (run?1.15:0.55) + 0.08;
+    kneeR=Math.max(0,-sw)*(run?1.15:0.55) + 0.08;
+    armLX=-sw*armAmp; armRX=sw*armAmp;
+    armLZ=-0.16-Math.max(0,sw)*0.10;
+    armRZ=0.16+Math.max(0,-sw)*0.10;
+    elbL=0.20+Math.max(0,-sw)*0.45;
+    elbR=0.20+Math.max(0,sw)*0.45;
+    chestX=run?0.20:0.06;
+    chestY=Math.sin(phase)*0.05;
+    chestZ=Math.sin(phase)*0.025;
+    headX=-chestX*0.75;
+    headY=-chestY*0.75;
+    visY=Math.abs(Math.sin(phase*2))*(run?0.075:0.035);
+    swordX=-0.35-Math.max(0,-sw)*0.20;
+    tailX=0.55+(run?0.22:0.08)+Math.sin(phase)*0.04;
+    tailZ=Math.sin(phase)*0.08;
+    capeX=0.14+(run?0.35:0.10)+Math.sin(phase*2)*0.04;
+    capeZ=Math.sin(phase)*0.06;
+    scarfX=0.05+(run?0.35:0.10);
+    skirtSwing=sw*(run?0.22:0.12);
+  }
+  else{
+    // ---------- 待机 ----------
+    const breath=Math.sin(now*1.55)*0.022;
+    const shift=Math.sin(now*0.52)*0.035;
+    visY=breath+Math.abs(shift)*0.12;
+    chestX=0.02+breath*0.4;
+    chestY=shift*0.7;
+    chestZ=shift*0.05;
+    headY=Math.sin(now*0.34)*0.32+shift*0.55;
+    headX=Math.sin(now*0.27)*0.035;
+    headZ=shift*0.04;
+    armLX=0.05+breath*0.8+shift*0.2;
+    armRX=-0.05-breath*0.8-shift*0.2;
+    armLZ=-0.16+shift*0.08;
+    armRZ=0.16+shift*0.08;
+    elbL=0.15+Math.sin(now*1.55)*0.03;
+    elbR=0.15-Math.sin(now*1.55)*0.03;
+    legLX=shift*0.10; legRX=-shift*0.10;
+    kneeL=0.05; kneeR=0.05;
+    tailX=0.55+Math.sin(now*1.4)*0.04;
+    tailZ=Math.sin(now*0.9)*0.05;
+    capeX=0.14+Math.sin(now*1.1)*0.03;
+    skirtSwing=shift*0.08;
+    swordX=-0.35;
+  }
+
+  // ---------- 连击姿态（可覆盖四肢） ----------
+  function applyAttackPose(combo,ease){
+    const e=1-Math.pow(1-ease,2);
+    const weaponType=currentWeapon?currentWeapon.type:'sword';
+    if(weaponType==='spear'){
+      armRX=-1.10-e*0.55; armRZ=-0.18; elbR=0.15+e*0.20;
+      armLX=-0.80; armLZ=0.25; elbL=0.55;
+      chestX=0.10+e*0.14; chestY=-0.25+e*0.45;
+      visZ=0.10+e*0.16;
+      legLX=-0.20; legRX=0.20;
+      swordX=-1.15; swordY=0.0; swordZ=0.0;
+    } else if(weaponType==='greatsword'){
+      const up=ease<0.42?ease/0.42:(1-ease)/0.58;
+      armRX=-0.9-up*2.3; armRZ=-0.35+up*0.35; elbR=0.25+up*0.35;
+      armLX=-0.75-up*1.5; armLZ=0.25-up*0.25; elbL=0.30+up*0.30;
+      chestX=0.12+up*0.25; chestY=-0.40+e*0.8;
+      legLX=-0.25; legRX=0.25; kneeL=0.25; kneeR=0.25;
+      swordX=-1.2+up*1.6; swordY=0.0; swordZ=0.0;
+    } else if(combo===1){
+      armRX=-0.55-e*2.05; armRZ=-0.75+e*1.55; elbR=0.25+e*0.30;
+      armLX=-0.35; armLZ=0.20; elbL=0.30;
+      chestX=0.10+e*0.14; chestY=-0.32+e*0.72;
+      legLX=-0.20; legRX=0.10;
+      swordX=-0.55-e*0.65; swordY=0.05; swordZ=0.15+e*1.25;
+    } else if(combo===2){
+      armRX=-2.30+e*1.65; armRZ=0.65-e*1.55; elbR=0.30;
+      armLX=-0.40; armLZ=-0.10; elbL=0.25;
+      chestX=0.13; chestY=0.42-e*0.95;
+      legLX=0.15; legRX=-0.20;
+      swordX=-0.85+e*0.70; swordZ=-0.55+e*1.20;
+    } else {
+      const up=ease<0.45?ease/0.45:(1-ease)/0.55;
+      armRX=-2.75+up*0.75; armRZ=0.10; elbR=0.35;
+      armLX=-1.20+up*0.30; armLZ=0.30; elbL=0.55;
+      chestX=0.12+ease*0.30; chestY=-0.10;
+      legLX=-0.30; legRX=0.25; kneeL=0.30; kneeR=0.20;
+      swordX=-1.35+ease*1.35; swordZ=0;
+    }
+  }
+
+  // 长兵器/大剑在待机时不要插进地面
+  if(player.attackTimer<=0&&player.spinAttack<=0&&!player.riding&&currentWeapon){
+    if(currentWeapon.type==='greatsword') swordX=-0.95;
+    else if(currentWeapon.type==='spear') swordX=-0.52;
+  }
+
+  // ---------- 派生关节姿态（脊柱/颈/腕/踝/趾/手指/下颌） ----------
+  let spineX=chestX*0.30, spineY=chestY*0.30, spineZ=chestZ*0.40;
+  let neckX=headX*0.30, neckY=headY*0.30, neckZ=headZ*0.30;
+  let wristLX=0, wristRX=0;
+  let ankleLX=-kneeL*0.55, ankleRX=-kneeR*0.55;
+  let toeLX=0, toeRX=0;
+  let fingerCurl=0.18;
+  let jawX=0;
+  if(moving){
+    const sp=Math.sin(phase);
+    ankleLX=-kneeL*0.55 + sp*0.18;
+    ankleRX=-kneeR*0.55 - sp*0.18;
+    toeLX=Math.max(0,-sp)*0.45;
+    toeRX=Math.max(0,sp)*0.45;
+    fingerCurl=run?0.78:0.34;
+    wristLX=sp*0.18; wristRX=-sp*0.18;
+    spineY=-chestY*0.45;
+  }
+  if(player.attackTimer>0||player.spinAttack>0){
+    fingerCurl=0.95; wristRX=-0.35; wristLX=-0.15;
+  }
+  if(player.aiming){ fingerCurl=0.85; wristLX=-0.22; wristRX=-0.18; neckX-=0.06; }
+  if(player.climbing){
+    fingerCurl=1.0;
+    ankleLX=-0.35; ankleRX=-0.35; toeLX=0.5; toeRX=0.5;
+    wristLX=-0.25; wristRX=-0.25;
+    neckX=-0.12;
+  }
+  if(player.gliding){ ankleLX=0.25; ankleRX=0.20; toeLX=-0.25; toeRX=-0.25; fingerCurl=0.7; }
+  if(!player.onGround&&!player.gliding&&!player.climbing){ toeLX=-0.2; toeRX=-0.2; }
+  if(player.riding){ fingerCurl=0.78; ankleLX=-0.25; ankleRX=-0.25; wristLX=-0.15; wristRX=-0.15; }
+  if(player.surfing>0){ ankleLX=-0.55; ankleRX=-0.35; fingerCurl=0.55; }
+  if(player.state==='dead'){ fingerCurl=0.4; }
+  const talk=typeof dialogActive!=='undefined'&&dialogActive;
+  if(talk) jawX=Math.abs(Math.sin(now*9.5))*0.20;
+  else jawX=0.01+Math.sin(now*1.25)*0.012;
+
+  // ---------- 应用旋转 ----------
+  const limbK=1-Math.exp(-20*dt);
+  const bodyK=1-Math.exp(-12*dt);
+  const secK=1-Math.exp(-7*dt);
+  p.chest.rotation.x=lerp(p.chest.rotation.x,chestX,bodyK);
+  p.chest.rotation.y=lerp(p.chest.rotation.y,chestY,bodyK);
+  p.chest.rotation.z=lerp(p.chest.rotation.z,chestZ,bodyK);
+  if(p.spine){
+    p.spine.rotation.x=lerp(p.spine.rotation.x,spineX,bodyK);
+    p.spine.rotation.y=lerp(p.spine.rotation.y,spineY,bodyK);
+    p.spine.rotation.z=lerp(p.spine.rotation.z,spineZ,bodyK);
+    p.spine.position.y=lerp(p.spine.position.y,0.98+visY*0.25,bodyK);
+  }
+  if(p.neck){
+    p.neck.rotation.x=lerp(p.neck.rotation.x,neckX,bodyK);
+    p.neck.rotation.y=lerp(p.neck.rotation.y,neckY,bodyK);
+    p.neck.rotation.z=lerp(p.neck.rotation.z,neckZ,bodyK);
+  }
+  p.chest.position.y=0;
+  p.head.rotation.x=lerp(p.head.rotation.x,headX,bodyK);
+  p.head.rotation.y=lerp(p.head.rotation.y,headY,bodyK);
+  p.head.rotation.z=lerp(p.head.rotation.z,headZ,bodyK);
+  if(p.jaw) p.jaw.rotation.x=lerp(p.jaw.rotation.x,jawX,1-Math.exp(-16*dt));
+  p.armL.pivot.rotation.x=lerp(p.armL.pivot.rotation.x,armLX,limbK);
+  p.armL.pivot.rotation.y=lerp(p.armL.pivot.rotation.y,armLY,limbK);
+  p.armL.pivot.rotation.z=lerp(p.armL.pivot.rotation.z,armLZ,limbK);
+  p.armL.elbow.rotation.x=lerp(p.armL.elbow.rotation.x,elbL,limbK);
+  p.armR.pivot.rotation.x=lerp(p.armR.pivot.rotation.x,armRX,limbK);
+  p.armR.pivot.rotation.y=lerp(p.armR.pivot.rotation.y,armRY,limbK);
+  p.armR.pivot.rotation.z=lerp(p.armR.pivot.rotation.z,armRZ,limbK);
+  p.armR.elbow.rotation.x=lerp(p.armR.elbow.rotation.x,elbR,limbK);
+  // 锁骨 / 腕
+  p.armL.clav.rotation.z=lerp(p.armL.clav.rotation.z,-armLZ*0.10,limbK);
+  p.armR.clav.rotation.z=lerp(p.armR.clav.rotation.z,-armRZ*0.10,limbK);
+  p.armL.wrist.rotation.x=lerp(p.armL.wrist.rotation.x,wristLX,limbK);
+  p.armR.wrist.rotation.x=lerp(p.armR.wrist.rotation.x,wristRX,limbK);
+  p.armL.wrist.rotation.z=lerp(p.armL.wrist.rotation.z,0,limbK);
+  p.armR.wrist.rotation.z=lerp(p.armR.wrist.rotation.z,0,limbK);
+  // 手指抓握
+  const fc=fingerCurl;
+  for(const side of ['L','R']){
+    const arr=p.fingers&&p.fingers[side];
+    if(!arr) continue;
+    arr.forEach((f,i)=>{
+      const isThumb=!!f.thumb;
+      const base=isThumb?0.35+fc*0.55:0.22+fc*1.15;
+      const mid=isThumb?0.25+fc*0.9:fc*1.25;
+      f.base.rotation.x=lerp(f.base.rotation.x,base,limbK);
+      f.mid.rotation.x=lerp(f.mid.rotation.x,mid,limbK);
+      if(f.dist) f.dist.rotation.x=lerp(f.dist.rotation.x,mid*0.7,limbK);
+    });
+  }
+  p.legL.pivot.rotation.x=lerp(p.legL.pivot.rotation.x,legLX,limbK);
+  p.legL.pivot.rotation.z=lerp(p.legL.pivot.rotation.z,legLZ,limbK);
+  p.legR.pivot.rotation.x=lerp(p.legR.pivot.rotation.x,legRX,limbK);
+  p.legR.pivot.rotation.z=lerp(p.legR.pivot.rotation.z,legRZ,limbK);
+  p.legL.knee.rotation.x=lerp(p.legL.knee.rotation.x,kneeL,limbK);
+  p.legR.knee.rotation.x=lerp(p.legR.knee.rotation.x,kneeR,limbK);
+  // 踝 / 趾
+  p.legL.ankle.rotation.x=lerp(p.legL.ankle.rotation.x,ankleLX,limbK);
+  p.legR.ankle.rotation.x=lerp(p.legR.ankle.rotation.x,ankleRX,limbK);
+  p.legL.toePivot.rotation.x=lerp(p.legL.toePivot.rotation.x,toeLX,limbK);
+  p.legR.toePivot.rotation.x=lerp(p.legR.toePivot.rotation.x,toeRX,limbK);
+  p.weaponRoot.rotation.x=lerp(p.weaponRoot.rotation.x,swordX,limbK);
+  p.weaponRoot.rotation.y=lerp(p.weaponRoot.rotation.y,swordY,limbK);
+  p.weaponRoot.rotation.z=lerp(p.weaponRoot.rotation.z,swordZ,limbK);
+
+  // 根节点：受击偏移 / 前冲 / 旋转斩 / 死亡
+  p.visual.position.x=lerp(p.visual.position.x,visX+(player.hurtShake>0?rand(-0.05,0.05):0),1-Math.exp(-25*dt));
+  p.visual.position.z=lerp(p.visual.position.z,visZ,1-Math.exp(-18*dt));
+  p.visual.position.y=lerp(p.visual.position.y,visY,1-Math.exp(-18*dt));
+  p.visual.rotation.x=lerp(p.visual.rotation.x,rootX,1-Math.exp(-10*dt));
+  p.visual.rotation.z=lerp(p.visual.rotation.z,rootZ,1-Math.exp(-10*dt));
+  if(player.spinAttack>0){ p.visual.rotation.y=spinY; }
+  else p.visual.rotation.y=lerp(p.visual.rotation.y,0,1-Math.exp(-18*dt));
+
+  // 二次动态：头发/披风/围巾/裙甲
+  p.hairTail.rotation.x=lerp(p.hairTail.rotation.x,tailX,secK);
+  p.hairTail.rotation.z=lerp(p.hairTail.rotation.z,tailZ,secK);
+  if(p.hairTail1){ p.hairTail1.rotation.x=lerp(p.hairTail1.rotation.x,-0.12+Math.sin(now*2.1)*0.05,secK); }
+  if(p.hairTail2){ p.hairTail2.rotation.x=lerp(p.hairTail2.rotation.x,0.10+Math.sin(now*2.4)*0.07,secK); }
+  if(p.capeRoot){
+    p.capeRoot.rotation.x=lerp(p.capeRoot.rotation.x,capeX,secK);
+    p.capeRoot.rotation.z=lerp(p.capeRoot.rotation.z,capeZ,secK);
+  }
+  if(p.capeLower) p.capeLower.rotation.x=lerp(p.capeLower.rotation.x,-0.08+Math.sin(now*3.2)*0.05,secK);
+  if(p.scarfTail){
+    p.scarfTail.rotation.x=lerp(p.scarfTail.rotation.x,scarfX,secK);
+    p.scarfTail.rotation.z=lerp(p.scarfTail.rotation.z,Math.sin(now*2.6)*0.12,secK);
+  }
+  if(p.scarfTail2) p.scarfTail2.rotation.x=lerp(p.scarfTail2.rotation.x,0.1+Math.sin(now*3.4)*0.10,secK);
+  if(p.skirtPanels){
+    p.skirtPanels.forEach((panel,i)=>{
+      const a=skirtSwing+(i%2?1:-1)*0.04;
+      panel.rotation.x=lerp(panel.rotation.x,a,secK);
+      panel.rotation.z=lerp(panel.rotation.z,(i%2?1:-1)*0.03+(player.riding?0.10:0),secK);
+    });
+  }
+
+  // 滑翔伞 / 盾板 / 盾牌 / 武器可见性
+  if(p.paraglider){
+    p.paraglider.visible=gliderOpen>0.01;
+    if(p.paraglider.visible){
+      p.paraglider.scale.x=lerp(p.paraglider.scale.x,0.2+gliderOpen*0.8,1-Math.exp(-10*dt));
+      p.paraglider.scale.y=lerp(p.paraglider.scale.y,0.2+gliderOpen*0.8,1-Math.exp(-10*dt));
+      p.paraglider.rotation.z=Math.sin(now*2.1)*0.03;
+      p.paraglider.position.y=2.02+Math.sin(now*2.3)*0.03;
+    }
+  }
+  const shieldUp=player.shieldUp&&!!currentShield;
+  if(p.frontShield) p.frontShield.visible=shieldUp&&!player.climbing&&!player.swimming;
+  if(p.backShield) p.backShield.visible=!shieldUp&&!!currentShield&&!player.riding;
+  if(p.surfBoard) p.surfBoard.visible=player.surfing>0;
+  if(p.surfBoard&&p.surfBoard.visible){ p.surfBoard.rotation.y+=dt*4; }
+  if(p.bowHand) p.bowHand.visible=player.aiming&&!player.climbing&&!player.swimming;
+  if(p.bowBack) p.bowBack.visible=!player.aiming&&!player.climbing;
+  if(p.weaponRoot) p.weaponRoot.visible=!!currentWeapon&&!shieldUp&&!player.climbing&&!player.aiming;
+  if(p.quiver) p.quiver.visible=!player.climbing;
+}
+
+// ============================================================
+// 怪物 AI（三段式攻击动画）
+// ============================================================
+function animateMeleeAttack(m, dt, dist, doHit){
+  if(m.atkPhase === undefined){ m.atkPhase = 0; m.atkTimer = 0; m.atkHitDone = false; }
+  m.atkTimer += dt;
+
+  // 阶段 0：前摇
+  if(m.atkPhase === 0){
+    if(m.parts && m.parts.armR){
+      m.parts.armR.rotation.x = lerp(m.parts.armR.rotation.x, -2.2, dt*10);
+      m.parts.armR.rotation.z = lerp(m.parts.armR.rotation.z, -0.3, dt*10);
+    }
+    if(m.atkTimer > 0.45){ m.atkPhase = 1; m.atkTimer = 0; m.atkHitDone = false; }
+    return 'windup';
+  }
+  // 阶段 1：挥击
+  if(m.atkPhase === 1){
+    if(m.parts && m.parts.armR){
+      m.parts.armR.rotation.x = lerp(m.parts.armR.rotation.x, 1.4, dt*22);
+      m.parts.armR.rotation.z = lerp(m.parts.armR.rotation.z, 0.4, dt*22);
+    }
+    if(m.atkTimer > 0.10 && !m.atkHitDone){
+      m.atkHitDone = true;
+      if(dist < 3.8) doHit();
+    }
+    if(m.atkTimer > 0.22){ m.atkPhase = 2; m.atkTimer = 0; }
+    return 'swing';
+  }
+  // 阶段 2：收招
+  if(m.parts && m.parts.armR){
+    m.parts.armR.rotation.x = lerp(m.parts.armR.rotation.x, 0, dt*8);
+    m.parts.armR.rotation.z = lerp(m.parts.armR.rotation.z, 0, dt*8);
+  }
+  if(m.atkTimer > 0.35){
+    m.atkPhase = 0; m.atkTimer = 0; m.atkHitDone = false;
+    return 'done';
+  }
+  return 'recover';
+}
+
+function updateNewMonsterAI(m,dt,dist,toPlayer){
+  const h=terrainHeight(m.pos.x,m.pos.z);
+  if(m.type==='hinox'){
+    if(m.state==='sleeping'){
+      m.animT+=dt;
+      m.parts.body.scale.y=1.0+Math.sin(m.animT*1.4)*0.025;
+      if(dist<13&&!teleporting&&player.state!=='dead'){
+        m.state='chase'; m.alertLevel=3; SFX.bossRoar();
+        toast('西诺克斯被吵醒了！');
+        for(const arm of m.parts.arms) arm.rotation.z=0;
+      }
+      return;
+    }
+    m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+    m.attackCD-=dt;
+    if(dist>4.8){
+      const dir=toPlayer.clone().normalize();
+      m.pos.x+=dir.x*m.speed*dt; m.pos.z+=dir.z*m.speed*dt;
+      m.group.position.set(m.pos.x,h,m.pos.z);
+      const sw=Math.sin(m.animT*4)*0.4;
+      m.parts.legs[0].rotation.x=sw; m.parts.legs[1].rotation.x=-sw;
+      m.parts.arms[0].rotation.z=-0.2+sw*0.3; m.parts.arms[1].rotation.z=0.2-sw*0.3;
+      m.animT+=dt;
+      if(m.attackCD<=-0.4&&dist>9){
+        // stomp shockwave
+        m.attackCD=rand(3,5);
+        emitParticles(sparkSys,m.pos.x,h+0.4,m.pos.z,45,7,0.8,new THREE.Color(0xd8b888));
+        if(dist<8) damagePlayer(Math.floor(m.damage*0.5));
+      }
+    } else {
+      const phase=animateMeleeAttack(m,dt,dist,()=>damagePlayer(m.damage));
+      if(phase==='done') m.attackCD=rand(1.2,2);
+      m.parts.legs[0].rotation.x=lerp(m.parts.legs[0].rotation.x,0,dt*8);
+      m.parts.legs[1].rotation.x=lerp(m.parts.legs[1].rotation.x,0,dt*8);
+    }
+    return;
+  }
+  if(m.type==='molduga'){
+    m.animT+=dt;
+    if(m.state==='lurk'){
+      m.patrolAngle+=dt*(dist<32?0.9:0.35);
+      const anchor=dist<36?player.pos:m.patrolCenter;
+      const tx=anchor.x+Math.cos(m.patrolAngle)*7;
+      const tz=anchor.z+Math.sin(m.patrolAngle)*7;
+      m.pos.x=lerp(m.pos.x,tx,1-Math.exp(-1.2*dt));
+      m.pos.z=lerp(m.pos.z,tz,1-Math.exp(-1.2*dt));
+      const ground=terrainHeight(m.pos.x,m.pos.z);
+      m.group.position.set(m.pos.x,ground-1.25+Math.sin(m.animT*3)*0.12,m.pos.z);
+      m.group.rotation.y=Math.atan2(player.pos.x-m.pos.x,player.pos.z-m.pos.z);
+      m.lurkT-=dt;
+      if(m.lurkT<=0&&dist<30&&player.state!=='dead'){
+        m.state='leap'; m.leapT=0; m.leapFrom=m.pos.clone(); m.leapTarget=player.pos.clone();
+        SFX.bossRoar(); emitParticles(waterSys,m.pos.x,ground+0.1,m.pos.z,40,5,0.7,new THREE.Color(0xd8b888));
+      }
+    } else if(m.state==='leap'){
+      m.leapT+=dt;
+      const t=clamp(m.leapT/1.45,0,1);
+      m.pos.x=lerp(m.leapFrom.x,m.leapTarget.x,t);
+      m.pos.z=lerp(m.leapFrom.z,m.leapTarget.z,t);
+      const ground=terrainHeight(m.pos.x,m.pos.z);
+      m.group.position.set(m.pos.x,ground-1.0+Math.sin(t*Math.PI)*6.5,m.pos.z);
+      m.group.rotation.x=Math.sin(t*Math.PI)*-0.4;
+      m.group.rotation.y=Math.atan2(m.leapTarget.x-m.leapFrom.x,m.leapTarget.z-m.leapFrom.z);
+      if(Math.random()<dt*20) emitParticles(waterSys,m.pos.x,ground+0.3,m.pos.z,4,2.5,0.5,new THREE.Color(0xd8b888));
+      if(t>=1){
+        m.state='surface'; m.surfaceT=2.8; m.group.rotation.x=0; m.attackCD=1;
+        emitParticles(waterSys,m.pos.x,ground+0.2,m.pos.z,85,9,1.0,new THREE.Color(0xd8b888));
+        if(dist<7.5) damagePlayer(Math.floor(m.damage*1.2));
+        if(typeof physics!=='undefined') physics.applyRadialImpulse({x:m.pos.x,y:ground,z:m.pos.z},8,14,0.8);
+      }
+    } else if(m.state==='surface'){
+      m.surfaceT-=dt;
+      const ground=terrainHeight(m.pos.x,m.pos.z);
+      m.group.position.set(m.pos.x,ground-0.15+Math.sin(m.animT*7)*0.06,m.pos.z);
+      m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+      m.attackCD-=dt;
+      if(dist<4.5&&m.attackCD<=0){ m.attackCD=1.8; damagePlayer(m.damage); }
+      if(m.surfaceT<=0){ m.state='lurk'; m.lurkT=rand(3,5); }
+    }
+    return;
+  }
+  if(m.type==='yiga'){
+    m.animT+=dt;
+    m.teleportCD-=dt;
+    if(dist<28&&!teleporting&&player.state!=='dead'){
+      if(m.teleportCD<=0&&dist>3){
+        m.teleportCD=rand(2.6,4.2);
+        const a=Math.atan2(player.pos.x-m.pos.x,player.pos.z-m.pos.z)+rand(-1.2,1.2);
+        const r=rand(5,8);
+        const nx=player.pos.x+Math.sin(a)*r, nz=player.pos.z+Math.cos(a)*r;
+        emitParticles(sparkSys,m.pos.x,m.pos.y+1,m.pos.z,30,6,0.6,new THREE.Color(0xaa3355));
+        m.pos.set(nx,terrainHeight(nx,nz),nz); m.group.position.copy(m.pos);
+        m.group.visible=true;
+        emitParticles(sparkSys,nx,m.pos.y+1,nz,30,6,0.6,new THREE.Color(0xaa3355));
+      }
+      m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+      if(dist>2.6){
+        const dir=toPlayer.clone().normalize();
+        m.pos.x+=dir.x*m.speed*dt; m.pos.z+=dir.z*m.speed*dt;
+        m.group.position.set(m.pos.x,h,m.pos.z);
+        m.parts.body.rotation.z=Math.sin(m.animT*12)*0.1;
+      } else {
+        m.attackCD-=dt;
+        if(m.attackCD<=0){ m.attackCD=1.3; damagePlayer(m.damage); emitParticles(sparkSys,m.pos.x,m.pos.y+1,m.pos.z,20,5,0.5,new THREE.Color(0xffccbb)); }
+      }
+    } else {
+      m.patrolAngle+=dt*0.7;
+      m.pos.x=m.patrolCenter.x+Math.cos(m.patrolAngle)*5;
+      m.pos.z=m.patrolCenter.z+Math.sin(m.patrolAngle)*5;
+      m.group.position.set(m.pos.x,terrainHeight(m.pos.x,m.pos.z),m.pos.z);
+      m.group.rotation.y+=dt*0.5;
+    }
+    return;
+  }
+  if(m.type==='wizzrobe'){
+    m.animT+=dt; m.floatT+=dt; m.teleportCD-=dt; m.attackCD-=dt;
+    m.group.position.set(m.pos.x,m.baseY+0.4+Math.sin(m.floatT*1.8)*0.28,m.pos.z);
+    m.pos.y=m.group.position.y;
+    m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+    m.parts.body.rotation.z=Math.sin(m.animT*1.5)*0.04;
+    m.parts.orb.rotation.y+=dt*2;
+    if(dist<30&&m.teleportCD<=0){
+      m.teleportCD=rand(4,6);
+      if(dist<7){ m.pos.x-=toPlayer.x/Math.max(1,dist)*9; m.pos.z-=toPlayer.z/Math.max(1,dist)*9; }
+      else { m.pos.x=player.pos.x+rand(-12,12); m.pos.z=player.pos.z+rand(-12,12); }
+      m.pos.x=clamp(m.pos.x,-HALF_X+50,HALF_X-50); m.pos.z=clamp(m.pos.z,-HALF_Z+50,HALF_Z-50);
+      m.baseY=terrainHeight(m.pos.x,m.pos.z)+0.5;
+      emitParticles(sparkSys,m.pos.x,m.baseY+1,m.pos.z,40,7,0.7,new THREE.Color({fire:0xff6622,ice:0x66ccff,thunder:0xffdd44}[m.elem]||0xffffff));
+    }
+    if(dist<26&&m.attackCD<=0&&!m.staggerT){
+      m.attackCD=rand(2.4,3.8);
+      const col={fire:0xff6622,ice:0x66ccff,thunder:0xffdd44}[m.elem]||0xffaa66;
+      const origin=m.pos.clone().add(new THREE.Vector3(0,2.1,0));
+      for(let i=0;i<2;i++) setTimeout(()=>{ if(monsters.includes(m)&&m.state!=='dead') spawnBossOrb(origin.clone(),player.pos.clone().add(new THREE.Vector3(rand(-1,1),1.1,rand(-1,1))),11,col); },i*180);
+      SFX.rune();
+    }
+    return;
+  }
+  if(m.type==='kohga'){
+    m.animT+=dt;
+    if(!m.engaged&&dist<24&&player.state!=='dead'){
+      m.engaged=true; m.state='combat'; m.alertLevel=3; SFX.bossRoar();
+      showBossBar(m); toast('可盖大人 · 依盖队首领');
+      startDialog('可盖大人',['哈哈哈！没想到你竟然找到了这里！','依盖队最强的首领，可盖大人——','会让你见识真正的力量！']);
+    }
+    if(!m.engaged) return;
+    m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+    m.group.position.y=m.pos.y+Math.sin(m.animT*2)*0.12;
+    if(m.aura) m.aura.rotation.z+=dt*1.1;
+    m.teleportCD-=dt; m.attackCD-=dt;
+    if(m.teleportCD<=0){
+      m.teleportCD=rand(3,5);
+      emitParticles(sparkSys,m.pos.x,m.pos.y+2,m.pos.z,30,6,0.6,new THREE.Color(0xcc3355));
+      const a=rand(0,6.28), r=rand(7,12);
+      const nx=player.pos.x+Math.cos(a)*r, nz=player.pos.z+Math.sin(a)*r;
+      m.pos.set(nx,terrainHeight(nx,nz),nz); m.group.position.copy(m.pos);
+      emitParticles(sparkSys,nx,m.pos.y+2,nz,35,6,0.7,new THREE.Color(0xcc3355));
+    }
+    if(m.attackCD<=0){
+      m.attackCD=rand(1.6,2.6);
+      if(dist<4.6){ damagePlayer(m.damage); emitParticles(sparkSys,m.pos.x,m.pos.y+2,m.pos.z,25,5,0.5,new THREE.Color(0xffaaaa)); }
+      else {
+        for(let i=0;i<3;i++) setTimeout(()=>{
+          if(monsters.includes(m)&&m.state!=='dead') spawnBossOrb(m.pos.clone().add(new THREE.Vector3(0,3.8,0)),player.pos.clone().add(new THREE.Vector3(rand(-1,1),1.2,rand(-1,1))),13,0xcc3355,8);
+        },i*180);
+      }
+    }
+    if(m.group.position.y<m.pos.y-0.2) m.group.position.y=m.pos.y;
+    return;
+  }
+  if(m.type==='keese'){
+    m.animT+=dt;
+    const anchor=dist<22?player.pos:new THREE.Vector3(m.patrolCenter.x,terrainHeight(m.patrolCenter.x,m.patrolCenter.z),m.patrolCenter.z);
+    const circle=anchor.clone().add(new THREE.Vector3(Math.cos(m.animT*1.2)*6,2.6+Math.sin(m.animT*3)*0.6,Math.sin(m.animT*1.2)*6));
+    m.pos.lerp(circle,1-Math.exp(-1.0*dt));
+    m.group.position.copy(m.pos);
+    m.group.rotation.y+=dt*2.5;
+    const flap=Math.sin(m.animT*18)*0.6;
+    m.parts.wingL.rotation.z=Math.PI/2+flap; m.parts.wingR.rotation.z=-Math.PI/2-flap;
+    m.attackCD-=dt;
+    if(dist<2.4&&m.attackCD<=0&&player.state!=='dead'){ m.attackCD=2.2; damagePlayer(m.damage); }
+    return;
+  }
+}
+
+// ============================================================
+// ★ 怪物高密度关节场（1024/只）：数据化关节，零逐帧矩阵开销
+// ============================================================
+function buildMonsterJoints(m){
+  const N=1024;
+  const off=new Float32Array(N*3), typ=new Uint8Array(N), par=new Array(N);
+  const g=m.group;
+  let cx=0,cy=1.2,cz=0,sx=1.4,sy=2.2,sz=1.0;
+  try{
+    g.updateWorldMatrix(true,false);
+    const box=new THREE.Box3().setFromObject(g);
+    if(isFinite(box.min.x)&&isFinite(box.max.x)){
+      const c=box.getCenter(new THREE.Vector3()); g.worldToLocal(c);
+      const s=box.getSize(new THREE.Vector3());
+      cx=c.x; cy=c.y; cz=c.z; sx=Math.max(0.35,s.x); sy=Math.max(0.35,s.y); sz=Math.max(0.35,s.z);
+    }
+  }catch(e){}
+  const parts=[];
+  if(m.parts){ for(const k in m.parts){ const o=m.parts[k]; if(o&&o.isObject3D&&o!==g) parts.push(o); } }
+  let seed=(((m.pos.x*73856093)^(m.pos.z*19349663)^0x5f3759df)>>>0)||7;
+  const rnd=()=>{ seed=(seed*1664525+1013904223)>>>0; return seed/4294967296; };
+  for(let i=0;i<N;i++){
+    if(parts.length&&i%5===4){
+      const p=parts[(i/5|0)%parts.length];
+      par[i]=p;
+      const r=0.06+rnd()*0.16, th=rnd()*Math.PI*2, ph=Math.acos(2*rnd()-1);
+      off[i*3]=Math.sin(ph)*Math.cos(th)*r;
+      off[i*3+1]=Math.cos(ph)*r*1.4;
+      off[i*3+2]=Math.sin(ph)*Math.sin(th)*r;
+    } else {
+      par[i]=g;
+      off[i*3]=cx+(rnd()-0.5)*sx*0.9;
+      off[i*3+1]=Math.max(0.05,cy+(rnd()-0.5)*sy*0.9);
+      off[i*3+2]=cz+(rnd()-0.5)*sz*0.9;
+    }
+    typ[i]=i%3;
+  }
+  m.joints={n:N,off,par,typ};
+  m.jointCount=N;
+  return m.joints;
+}
+function updateMonsters(dt){
+  monsters.forEach(m=>{
+    if(!m.joints&&m.state!=='dead') buildMonsterJoints(m);
+    if(m.state==='dead'){
+      m.deadT=(m.deadT||0)+dt;
+      if(m.type==='guardian'||m.type==='flyingGuardian'){
+        updateGuardianDeath(m,dt);
+        if(m.deadT>7) scene.remove(m.group);
+      } else {
+        m.group.rotation.z=lerp(m.group.rotation.z,Math.PI/2,dt*3);
+        m.group.position.y=Math.max(m.pos.y-1.5,m.group.position.y-dt*0.8);
+        if(m.deadT>5) scene.remove(m.group);
+      }
+      return;
+    }
+    // Distance culling: the valley can hold a hundred monsters, but only the
+    // nearby ones need skinning/AI/shadow passes. Bosses stay visible much farther.
+    const pd=Math.hypot(m.pos.x-player.pos.x,m.pos.z-player.pos.z);
+    const cullD=(m.type==='guardian'||m.type==='flyingGuardian'||m.type==='lynel'||m.type==='hinox'||m.type==='molduga'||m.type==='divineBoss'||m.type==='ganon'||m.type==='mazKoshia')?260:135;
+    if(pd>cullD){ m.group.visible=false; return; }
+    m.group.visible=true;
+    updateMonsterStatus(m,dt);
+    if(m.state==='dead') return;
+    m.animT=(m.animT||0)+dt;
+    const toPlayer=player.pos.clone().sub(m.pos);
+    const dist=toPlayer.length();
+    if(m.staggerT>0){
+      m.staggerT-=dt;
+      m.group.rotation.z=Math.sin(m.animT*40)*0.08;
+      if(m.staggerT<=0){ m.state='chase'; m.group.rotation.z=0; }
+      return;
+    }
+    if(m.frozen>0) return;
+    if(m.shocked>0.5){ m.group.position.x+=rand(-0.03,0.03); return; }
+
+    let effectiveAggro=m.aggroRange;
+    if(player.stealthBuff>0) effectiveAggro*=0.5;
+    const armorB=getArmorBonus();
+    if(armorB.stealth) effectiveAggro*=Math.max(0.25,1-armorB.stealth);
+    if(keys['ShiftLeft'] && player.onGround) effectiveAggro*=0.7;
+    if(m.stealthAware) effectiveAggro*=0.85;
+
+    if(m.type==='mazKoshia'){
+      updateMazKoshiaAI(m,dt);
+      return;
+    }
+    if(m.type==='hinox'||m.type==='molduga'||m.type==='yiga'||m.type==='wizzrobe'||m.type==='keese'||m.type==='kohga'){
+      updateNewMonsterAI(m,dt,dist,toPlayer);
+      return;
+    }
+    if(m.type==='ganon'){
+      m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+      m.attackCD-=dt;
+      if(m.attackCD<=0&&dist<20){
+        m.attackCD=m.phase===1?2.5:1.8;
+        if(dist<6){ damagePlayer(m.damage); emitParticles(fireSys,m.pos.x,m.pos.y+2,m.pos.z,30,6,0.8,new THREE.Color(0xff4422)); }
+        else { for(let i=0;i<3;i++) setTimeout(()=>{ if(!ganon||ganon.hp<=0) return; emitParticles(sparkSys,m.pos.x,m.pos.y+3,m.pos.z,30,8,0.7,new THREE.Color(0xff6622)); if(Math.random()<0.4) damagePlayer(Math.floor(m.damage*0.6)); },i*180); }
+      }
+      return;
+    }
+    if(m.type==='divineBoss'){
+      m.animT+=dt;
+      const info=BLIGHT_INFO[m.id]||BLIGHT_INFO.fire;
+      m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+      const hover=m.group.userData.floating?1.0:0;
+      m.group.position.set(m.pos.x,m.pos.y+hover+Math.sin(m.animT*1.8)*0.12,m.pos.z);
+      m.core.position.y=3.4+Math.sin(m.animT*2.1)*0.18;
+      m.core.rotation.y+=dt*1.2;
+      if(m.parts&&m.parts.eye) m.eye.scale.setScalar(1+Math.sin(m.animT*4)*0.08);
+      if(m.parts&&m.parts.aura){ m.parts.aura.rotation.z+=dt*0.7; m.parts.aura.material.opacity=0.28+Math.sin(m.animT*2.4)*0.16; }
+      if(m.parts&&m.parts.arms){
+        m.parts.arms[0].shoulder.rotation.z=Math.sin(m.animT*1.9)*0.12;
+        m.parts.arms[1].shoulder.rotation.z=-Math.sin(m.animT*1.9)*0.12;
+      }
+      m.attackCD-=dt;
+      const enraged=m.hp<m.maxHp*0.38;
+      if(m.attackCD<=0&&dist<24){
+        m.attackCD=enraged?rand(1.0,1.7):rand(1.8,2.8);
+        if(dist<5.2){
+          damagePlayer(m.damage);
+          emitParticles(sparkSys,m.pos.x,m.pos.y+2.5,m.pos.z,45,8,0.7,new THREE.Color(info.acc));
+          if(m.parts&&m.parts.arms) m.parts.arms[1].shoulder.rotation.z=-1.0;
+        } else {
+          const n=enraged?4:2;
+          for(let i=0;i<n;i++){
+            setTimeout(()=>{
+              if(m.state==='dead') return;
+              const origin=m.pos.clone().add(new THREE.Vector3(0,3.3,0));
+              const tgt=player.pos.clone().add(new THREE.Vector3(rand(-1.2,1.2),1.2,rand(-1.2,1.2)));
+              spawnBossOrb(origin,tgt,enraged?16:12,info.acc,7);
+            },i*160);
+          }
+          emitParticles(sparkSys,m.pos.x,m.pos.y+3,m.pos.z,35,7,0.6,new THREE.Color(info.acc));
+        }
+      }
+      return;
+    }
+    if(m.type==='guardian'){
+      updateGuardianAI(m,dt,dist,toPlayer,effectiveAggro);
+      return;
+    }
+    // ★ 飞行守护者
+    if(m.type==='flyingGuardian'){
+      updateGuardianAI(m,dt,dist,toPlayer,effectiveAggro);
+      return;
+    }
+    if(m.type==='chuchu'){
+      m.hopCD = (m.hopCD||0) - dt;
+      if(m.hopCD <= 0 && m.pos.y <= groundHeightAt(m.pos.x,m.pos.z,0.3)+0.05){ m.hopCD = rand(0.7,1.3); m.vel.y = 6; }
+      m.vel.y -= GRAVITY*dt;
+      m.pos.y += m.vel.y*dt;
+      const gh = groundHeightAt(m.pos.x,m.pos.z,0.3);
+      if(m.pos.y < gh){ m.pos.y = gh; m.vel.y = 0; }
+      if(dist < effectiveAggro && dist > 2.2 && player.state!=='dead'){
+        const dir = toPlayer.clone().normalize();
+        m.pos.x += dir.x*m.speed*dt; m.pos.z += dir.z*m.speed*dt;
+      }
+      m.group.position.set(m.pos.x, m.pos.y, m.pos.z);
+      m.group.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+      if(m.parts.body) m.parts.body.scale.y = 0.85 + Math.sin(m.animT*10)*0.12;
+      if(dist < 2.4 && player.state!=='dead'){ m.attackCD -= dt; if(m.attackCD<=0){ damagePlayer(m.damage); m.attackCD=1.6; emitParticles(sparkSys,m.pos.x,m.pos.y+0.5,m.pos.z,20,5,0.4,new THREE.Color(0xaaff88)); } }
+      return;
+    }
+    // ★ 莫力布林 / 岩石巨人 / 莱尼尔：带三段式攻击
+    if(m.type==='moblin'||m.type==='stoneTalus'||m.type==='lynel'){
+      if(dist<effectiveAggro && player.state!=='dead' && !teleporting){
+        m.group.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+        if(dist > 4.5){
+          m.state = 'chase';
+          m.atkPhase = 0; m.atkTimer = 0; m.atkHitDone = false;
+          const dir = toPlayer.clone().normalize();
+          m.pos.x += dir.x*m.speed*dt; m.pos.z += dir.z*m.speed*dt;
+          m.group.position.set(m.pos.x, groundHeightAt(m.pos.x,m.pos.z,0.35), m.pos.z);
+          const sw = Math.sin(m.animT*6)*0.5;
+          if(m.parts){
+            if(m.parts.legL) m.parts.legL.rotation.x = sw;
+            if(m.parts.legR) m.parts.legR.rotation.x = -sw;
+            if(m.parts.armL) m.parts.armL.rotation.x = -sw*0.4;
+            if(m.parts.armR) m.parts.armR.rotation.x = sw*0.4;
+          }
+        } else {
+          m.state = 'attack';
+          animateMeleeAttack(m, dt, dist, () => {
+            damagePlayer(m.damage);
+            emitParticles(sparkSys, m.pos.x, m.pos.y+1.5, m.pos.z, 25, 5, 0.5, new THREE.Color(0xffaa44));
+          });
+        }
+      } else {
+        m.state = 'patrol';
+        m.atkPhase = 0; m.atkTimer = 0; m.atkHitDone = false;
+      }
+      return;
+    }
+    // 通用状态机（bokoblin / lizalfos）
+    if(m.state==='patrol'){
+      m.patrolAngle+=dt*0.4;
+      const tx=m.patrolCenter.x+Math.cos(m.patrolAngle)*10, tz=m.patrolCenter.z+Math.sin(m.patrolAngle)*10;
+      const dir=new THREE.Vector3(tx-m.pos.x,0,tz-m.pos.z);
+      if(dir.length()>0.5){ dir.normalize(); m.pos.x+=dir.x*m.speed*0.35*dt; m.pos.z+=dir.z*m.speed*0.35*dt; m.group.rotation.y=Math.atan2(dir.x,dir.z); }
+      m.group.position.set(m.pos.x,groundHeightAt(m.pos.x,m.pos.z,0.3),m.pos.z);
+      if(dist<effectiveAggro&&player.state!=='dead'&&!teleporting){ m.state='alert'; m.stateT=0.5; m.alertLevel=2; SFX.hit(); }
+      if(m.parts.legL){ const sw=Math.sin(m.animT*4)*0.35; m.parts.legL.rotation.x=sw; m.parts.legR.rotation.x=-sw; }
+    } else if(m.state==='alert'){
+      m.stateT-=dt; m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+      if(m.stateT<=0){ m.state='chase'; m.alertLevel=3; }
+    } else if(m.state==='chase'){
+      m.group.rotation.y=Math.atan2(toPlayer.x,toPlayer.z);
+      if(dist>effectiveAggro*1.8||teleporting||player.state==='dead'){ m.state='patrol'; m.alertLevel=0; return; }
+      if(dist < 4.2){ m.state = 'attack'; m.attackCD = 0; }
+      else {
+        const dir=toPlayer.clone().normalize(); m.pos.x+=dir.x*m.speed*dt; m.pos.z+=dir.z*m.speed*dt;
+        m.group.position.set(m.pos.x,groundHeightAt(m.pos.x,m.pos.z,0.3),m.pos.z);
+        if(m.parts.legL){
+          const sw=Math.sin(m.animT*9)*0.6;
+          m.parts.legL.rotation.x=sw; m.parts.legR.rotation.x=-sw;
+          m.parts.armL.rotation.x=-sw*0.5; m.parts.armR.rotation.x=sw*0.5;
+        }
+      }
+    } else if(m.state==='attack'){
+      m.group.rotation.y = Math.atan2(toPlayer.x, toPlayer.z);
+      const phase = animateMeleeAttack(m, dt, dist, () => damagePlayer(m.damage));
+      if(phase === 'done'){ m.state = 'chase'; m.attackCD = rand(1.4, 2.2); }
+      if(dist > 5.0 && m.atkPhase === 0 && phase !== 'done') m.state = 'chase';
+      if(dist > effectiveAggro * 1.8){ m.state = 'patrol'; m.atkPhase = 0; }
+    }
+  });
+}
+
+// ============================================================
+// 投掷物
+// ============================================================
+const _arrowEyeTmp=new THREE.Vector3();
+const _arrowBodyTmp=new THREE.Vector3();
+function updateProjectiles(dt){
+  for(let i=arrows.length-1;i>=0;i--){
+    const a=arrows[i]; a.life-=dt;
+    a.vel.y-=9.8*dt*0.5;
+    a.mesh.position.add(a.vel.clone().multiplyScalar(dt));
+    a.mesh.lookAt(a.mesh.position.clone().add(a.vel));
+    if(a.elem){
+      a.trailT=(a.trailT||0)-dt;
+      if(a.trailT<=0){ a.trailT=0.045; emitParticles(a.elem==='fire'?fireSys:a.elem==='ice'?waterSys:sparkSys,a.mesh.position.x,a.mesh.position.y,a.mesh.position.z,1,1.2,0.35,new THREE.Color(getArrowDef().color)); }
+    }
+    let hit=false;
+    const ap=a.mesh.position;
+    for(const m of monsters){
+      if(m.state==='dead') continue;
+      let hitBody=false, eyeHit=false;
+      if(m.type==='guardian'||m.type==='flyingGuardian'){
+        const eye=getGuardianEyePos(m,_arrowEyeTmp);
+        const eyeD=ap.distanceTo(eye);
+        const bodyD=ap.distanceTo(_arrowBodyTmp.set(m.pos.x,m.pos.y+(m.type==='flyingGuardian'?0.8:1.6),m.pos.z));
+        if(eyeD<0.85) eyeHit=true;
+        else if(bodyD<2.0) hitBody=true;
+        else continue;
+        let dmg=a.damage*(eyeHit?3.2:0.28);
+        let isCrit=eyeHit;
+        if(eyeHit){ m.stunT=Math.max(m.stunT||0,0.9); }
+        if(a.ancient) dmg*=4.5;
+        damageMonster(m,dmg,ap,isCrit);
+        if(a.elem&&a.elem!=='light') applyElementalHit(m,a.elem);
+        if(a.ancient) emitParticles(sparkSys,ap.x,ap.y,ap.z,40,7,0.6,new THREE.Color(0x66eeff));
+        hit=true; break;
+      }
+      let bodyRadius=m.type==='hinox'?2.3:m.type==='molduga'?2.2:m.type==='wizzrobe'?1.0:1.5;
+      let bodyY=m.type==='hinox'?m.pos.y+2.2:m.type==='molduga'?m.group.position.y+1.0:m.pos.y+1.5;
+      if(ap.distanceTo(_arrowBodyTmp.set(m.pos.x,bodyY,m.pos.z))<bodyRadius){
+        let dmg=a.damage; let isCrit=false;
+        if(m.type==='hinox'){
+          const eye=_arrowEyeTmp.set(m.pos.x,m.pos.y+4.25,m.pos.z+0.9);
+          if(ap.distanceTo(eye)<1.1){ dmg*=4; isCrit=true; m.staggerT=2.0; toast('命中独眼！'); }
+          else dmg*=0.55;
+        }
+        if(m.weakPoint==='head'&&m.type==='lynel'){ dmg*=2; isCrit=true; m.staggerT=1.2; }
+        if(a.ancient) dmg*=3.5;
+        if(m.type==='ganon') damageGanon(dmg,m.pos);
+        else if(m.type==='divineBoss') damageDivineBoss(m,dmg,m.pos);
+        else damageMonster(m,dmg,ap,isCrit);
+        if(a.elem&&a.elem!=='light') applyElementalHit(m,a.elem);
+        if(a.ancient) emitParticles(sparkSys,ap.x,ap.y,ap.z,40,7,0.6,new THREE.Color(0x66eeff));
+        hit=true; break;
+      }
+    }
+    if(!hit&&a.mesh.position.y<terrainHeight(a.mesh.position.x,a.mesh.position.z)){
+      emitParticles(sparkSys,a.mesh.position.x,a.mesh.position.y,a.mesh.position.z,10,3,0.4,new THREE.Color(0xccaa88)); hit=true;
+    }
+    if(hit&&a.bomb){ explodeAt(ap.clone(),6.5,80,true); }
+    else if(hit&&a.arrowType==='fire'){ igniteGrassAt(ap.x,ap.z); }
+    if(hit||a.life<=0){ scene.remove(a.mesh); a.mesh.geometry.dispose(); a.mesh.material.dispose(); arrows.splice(i,1); }
+  }
+  updateRuneFX(dt);
+  updateParticles(dt); updateTeleportFX(dt); updateSlashArcs(dt); updateLaserFX(dt); updateShockwaves(dt);
+}
+
+// ============================================================
+// 环境
+// ============================================================
+let timeOfDay=0.63;
+let weather={type:'clear',t:0,next:40};
+const rainSys=createParticles(2500,0.35,new THREE.Color(0xaaccff),THREE.NormalBlending);
+
+const ENV_STATE={cold:false,heat:false,fire:false,storm:false,uiT:0,lastKey:''};
+function updateTemperature(dt){
+  const x=player.pos.x,z=player.pos.z;
+  const h=terrainHeight(x,z);
+  const nx=x/HALF_X,nz=z/HALF_Z;
+  const b=getArmorBonus();
+  const coldW=(h>300)||(nx<-0.48&&nz<-0.36)||(timeOfDay>0.78&&h>210)||(weather.type==='rain'&&h>180);
+  const heatW=(nx<-0.36&&nz>0.30&&h<120)||(Math.hypot(x-LANDMARKS.gerudoTown.x,z-LANDMARKS.gerudoTown.z)<230&&timeOfDay<0.72);
+  const fireW=(nx>0.38&&nz<-0.22)||Math.hypot(x-LANDMARKS.goron.x,z-LANDMARKS.goron.z)<190||Math.hypot(x-LANDMARKS.divineFire.x,z-LANDMARKS.divineFire.z)<150;
+  const stormW=weather.type==='thunder';
+  ENV_STATE.cold=coldW; ENV_STATE.heat=heatW; ENV_STATE.fire=fireW; ENV_STATE.storm=stormW;
+  const coldSafe=!!b.cold||player.cold<0;
+  const heatSafe=!!b.heat||player.heat<0;
+  const fireSafe=!!b.fire;
+  const shockSafe=!!b.shock||!!b.lightning;
+  ENV_STATE.uiT-=dt;
+  if(ENV_STATE.uiT<=0){
+    ENV_STATE.uiT=0.30;
+    const hud=$('envHud');
+    const chips=[];
+    if(coldW) chips.push(`<span class="env-chip ${coldSafe?'safe':'danger'}">❄ 寒冷${coldSafe?' · 已防护':' · 精力恢复减缓'}</span>`);
+    if(heatW) chips.push(`<span class="env-chip ${heatSafe?'safe':'danger'}">☀ 炎热${heatSafe?' · 已防护':' · 体力流失'}</span>`);
+    if(fireW) chips.push(`<span class="env-chip ${fireSafe?'safe':'danger'}">🔥 灼热${fireSafe?' · 耐火':' · 需防火装备'}</span>`);
+    if(stormW) chips.push(`<span class="env-chip ${shockSafe?'safe':'danger'}">⚡ 雷雨${shockSafe?' · 绝缘':' · 金属引雷'}</span>`);
+    if(chips.length){ hud.innerHTML=chips.join(''); hud.style.display='flex'; }
+    else { hud.style.display='none'; }
+    // 防护提示
+    $('envTint').style.opacity=fireW&&!fireSafe?'0.20':coldW&&!coldSafe?'0.10':heatW&&!heatSafe?'0.10':stormW&&!shockSafe?'0.06':'0';
+    $('envTint').style.background=fireW?'radial-gradient(ellipse at center, transparent 35%, rgba(180,30,10,.55) 100%)':coldW?'radial-gradient(ellipse at center, transparent 40%, rgba(120,180,255,.38) 100%)':'radial-gradient(ellipse at center, transparent 40%, rgba(255,160,60,.38) 100%)';
+  }
+  // 环境伤害 / 精力惩罚
+  const danger=(coldW&&!coldSafe)||(heatW&&!heatSafe)||(fireW&&!fireSafe);
+  player.envTick=Math.max(0,(player.envTick||0)-dt);
+  if(danger&&player.envTick<=0){
+    player.envTick=fireW?5:11;
+    const kind=fireW?'fire':coldW?'cold':'heat';
+    damagePlayer(1,'env');
+    toast(fireW?'灼热难耐…需要防火装备':coldW?'寒意刺骨…需要防寒装备':'烈日灼人…需要耐热装备');
+  }
+  if(!danger) player.envTick=Math.min(player.envTick||0,1.5);
+  // 寒冷/炎热降低精力恢复
+  if((coldW&&!coldSafe)||(heatW&&!heatSafe)){
+    if(player.stamina>0) player.stamina=Math.max(0,player.stamina-Math.min(player.stamina,dt*0.006));
+  }
+}
+
+const _sunDir=new THREE.Vector3(0.4,0.8,0.2).normalize(), _skyDir=new THREE.Vector3(0.4,0.8,0.2).normalize();
+const _lightRight=new THREE.Vector3(), _lightUp=new THREE.Vector3();
+const _sunsetCol=new THREE.Color(0xff9a58), _duskAmb=new THREE.Color(0xe0a070), _twilightGround=new THREE.Color(0x3a2a22);
+
+function updateEnvironment(dt){
+  timeOfDay+=dt/1200; if(timeOfDay>1) timeOfDay-=1;
+  if(bloodMoonT>0) bloodMoonT=Math.max(0,bloodMoonT-dt);
+  bloodMoonTimer-=dt;
+  if(bloodMoonTimer<=0){ bloodMoonTimer=420; if(player.state!=='dead') triggerBloodMoon(); }
+  const ang=timeOfDay*Math.PI*2-Math.PI/2;
+  const sunY=Math.sin(ang), sunX=Math.cos(ang);
+  // Light direction is a pure function of the clock; the light *node* follows
+  // the player so the shadow frustum stays centred instead of drifting.
+  const isNight=sunY<0;
+  _sunDir.set(isNight?-sunX:sunX, isNight?Math.max(-sunY,0.02):Math.max(sunY,0.02), isNight?-0.18:0.18).normalize();
+  _skyDir.set(sunX,sunY,0.18).normalize();
+  sun.target.position.copy(player.pos);
+  // Snap the target in light space to whole shadow texels: kills the shimmer /
+  // crawling edge that appeared while walking.
+  const texel=(sun.shadow.camera.right-sun.shadow.camera.left)/sun.shadow.mapSize.x;
+  _lightRight.set(0,1,0).cross(_sunDir);
+  if(_lightRight.lengthSq()<1e-4) _lightRight.set(1,0,0);
+  _lightRight.normalize();
+  _lightUp.crossVectors(_sunDir,_lightRight).normalize();
+  const px=sun.target.position.dot(_lightRight), py=sun.target.position.dot(_lightUp);
+  const sx=Math.round(px/texel)*texel, sy=Math.round(py/texel)*texel;
+  sun.target.position.addScaledVector(_lightRight,sx-px).addScaledVector(_lightUp,sy-py);
+  sun.position.copy(sun.target.position).addScaledVector(_sunDir,620);
+  sun.target.updateMatrixWorld();
+  const duskW=clamp(1-Math.abs(sunY)*3.2,0,1);
+  const twilight=clamp(1-Math.abs(sunY)*10.0,0,1);
+  const dayI=clamp(sunY*2.6,0.02,2.6);
+  const moonI=clamp(-sunY*1.15,0.05,0.85);
+  sun.intensity=(isNight?moonI:dayI*(1+duskW*1.15))*(bloodMoonT>0?0.75:1);
+  hemi.intensity=clamp(0.36+Math.max(sunY,0)*0.95+duskW*2.6,0.32,2.3)+twilight*0.6;
+  sun.color.setHex(bloodMoonT>0?0xff5533:(isNight?0x93b4ff:0xffe6c4));
+  if(!isNight&&duskW>0) sun.color.lerp(_sunsetCol,duskW*0.75);
+  hemi.color.setHex(bloodMoonT>0?0x9a5050:(isNight?0x2a3d5c:0xc2d8ea));
+  if(!isNight&&duskW>0) hemi.color.lerp(_duskAmb,duskW*0.62);
+  if(isNight&&twilight>0) hemi.color.lerp(_duskAmb,twilight*0.75);
+  hemi.groundColor.setHex(bloodMoonT>0?0x3a1818:(isNight?0x10141c:0x3a3a2a));
+  if(isNight&&twilight>0) hemi.groundColor.lerp(_twilightGround,twilight*0.8);
+
+  const dayTop=new THREE.Color(0x3a6a9a), dayBot=new THREE.Color(0xc8d8d8);
+  const duskTop=new THREE.Color(0x242a52), duskBot=new THREE.Color(0xf0925c);
+  const nightTop=new THREE.Color(0x040812), nightBot=new THREE.Color(0x0a1420);
+  const dayF=clamp(sunY*2.5,0,1);
+  const duskF=clamp(1-Math.abs(sunY)*3.2,0,1)*(sunY>-0.2?1:0);
+  skyUniforms.topColor.value.copy(nightTop).lerp(dayTop,dayF).lerp(duskTop,duskF*0.62);
+  skyUniforms.bottomColor.value.copy(nightBot).lerp(dayBot,dayF).lerp(duskBot,duskF*0.72);
+  skyUniforms.horizonColor.value.setHex(0xdfe6dc).lerp(new THREE.Color(0xc8d2d2),dayF)
+    .lerp(new THREE.Color(0xe89054),duskF*0.95).lerp(new THREE.Color(0x101a2a),clamp(-sunY*5,0,1)*0.85)
+    .lerp(new THREE.Color(0x6a1418),bloodMoonT>0?0.6:0);
+  if(bloodMoonT>0){
+    skyUniforms.topColor.value.lerp(new THREE.Color(0x2a0810),0.82);
+    skyUniforms.bottomColor.value.lerp(new THREE.Color(0x6a1418),0.82);
+  }
+  skyUniforms.uSunDir.value.copy(_skyDir);
+  skyUniforms.uNight.value=clamp((-sunY-0.035)*7.5,0,1);
+  skyUniforms.uTime.value+=dt;
+  skyUniforms.uBlood.value=bloodMoonT>0?0.82:0;
+  skyUniforms.uSunI.value=clamp(sunY*4.0,0,1.6);
+  skyDome.position.set(player.pos.x,0,player.pos.z);
+  scene.fog.color.copy(skyUniforms.bottomColor.value);
+  waterUniforms.uSunDir.value.copy(_sunDir);
+
+  const toonAmb=0.5+0.5*clamp(sunY*2.5+0.3,0,1);
+  const toonLight=0.3+0.7*clamp(sunY*2.2+0.35,0,1);
+  const toonNight=clamp(-sunY*3.0,0,1)*0.8;
+  updateToonLightDir(_sunDir,toonAmb,toonLight,toonNight);
+
+  cloudGroup.rotation.y+=dt*0.0015;
+  waterUniforms.uTime.value+=dt;
+
+  const now=performance.now()*0.001;
+  shrines.forEach((s,i)=>{
+    s.orb.rotation.y+=dt*(s.activated?2.2:0.7);
+    s.orb.rotation.x+=dt*(s.activated?1.1:0.3);
+    s.orb.position.y=s.baseY+Math.sin(now*2+i)*0.15;
+    if(s.ring) s.ring.rotation.z+=dt*0.5;
+    if(s.halo) s.halo.rotation.z-=dt*0.18;
+    if(s.barrier){ s.barrier.material.opacity=0.07+Math.sin(now*1.8+i)*0.03; s.barrier.scale.setScalar(1+Math.sin(now*1.2+i)*0.02); }
+    if(s.doorGlow) s.doorGlow.material.opacity=0.24+Math.sin(now*2.4+i)*0.10;
+    s.mat.emissiveIntensity=s.activated?1.6+Math.sin(now*3+i)*0.35:0.35+Math.sin(now*1.5+i)*0.2;
+  });
+  towers.forEach((t,i)=>{
+    t.eyeRing.rotation.z+=dt*(t.activated?1.4:0.35);
+    if(t.activated){
+      t.beam.material.opacity=0.22+Math.sin(now*2.2+i)*0.09;
+      t.beam.scale.x=t.beam.scale.z=1+Math.sin(now*1.6+i)*0.08;
+      t.beacon.rotation.z+=dt*0.7;
+    }
+  });
+  divineBeasts.forEach((b,i)=>{
+    const A=b.animated;
+    if(!A) return;
+    if(A.core){ A.core.rotation.y+=dt*0.9; }
+    if(A.wingL&&A.wingR){
+      const flap=Math.sin(now*0.7+i)*0.10;
+      A.wingL.rotation.z=flap; A.wingR.rotation.z=-flap;
+      b.group.position.y=b.baseY+Math.sin(now*0.6+i)*0.6;
+      if(A.rotor) A.rotor.rotation.z+=dt*0.5;
+    }
+    if(A.trunk) A.trunk.rotation.z=Math.sin(now*0.6+i)*0.08;
+    if(A.tail) A.tail.rotation.y=Math.sin(now*0.8+i)*0.18;
+    if(A.neck) A.neck.rotation.y=Math.sin(now*0.45+i)*0.10;
+    if(A.jaw) A.jaw.rotation.x=0.05+Math.sin(now*0.9+i)*0.04;
+  });
+  koroks.forEach(k=>{ if(k.collected) return; const d=k.pos.distanceTo(player.pos); k.group.visible=d<k.revealDist*(player.korokSight||1); if(k.group.visible) k.group.rotation.y+=dt*2; });
+  chests.forEach(c=>{ if(!c.group) return; c.group.visible=c.pos.distanceTo(player.pos)<170; });
+  memorySpots.forEach(s=>{ if(!s.collected) s.orb.rotation.y+=dt*1.5; });
+  windmillBlades.forEach(b=>{ b.rotation.z += dt*0.6; });
+  campfires.forEach(c=>{
+    const t=performance.now()*0.008;
+    c.flame.scale.set(1+Math.sin(t)*0.1, 1+Math.sin(t*1.3)*0.15, 1+Math.cos(t)*0.1);
+    c.flame2.scale.set(1+Math.cos(t*1.2)*0.15, 1+Math.sin(t)*0.2, 1+Math.sin(t*1.1)*0.1);
+    if(c.light){ c.light.visible=!!c.pos&&c.pos.distanceTo(player.pos)<65; c.light.intensity=1.8+Math.sin(t*2)*0.4; }
+  });
+
+  // ★ NPC 名牌距离淡出
+  npcs.forEach(n => {
+    const spr = n.group.userData.label; if(!spr) return;
+    const d = n.pos.distanceTo(player.pos);
+    spr.material.opacity = d < 60 ? 1 : (d < 90 ? (90 - d) / 30 : 0);
+    spr.visible = spr.material.opacity > 0.02;
+  });
+
+  weather.t+=dt;
+  if(weather.t>weather.next){
+    weather.t=0;
+    const r=Math.random();
+    if(r<0.15) weather.type='rain'; else if(r<0.20) weather.type='thunder'; else if(r<0.26) weather.type='fog'; else weather.type='clear';
+    weather.next=rand(30,60);
+    if(weather.type==='rain') toast('开始下雨了…');
+    else if(weather.type==='thunder') toast('雷雨来了…金属装备会引雷！');
+    else if(weather.type==='fog') toast('雾气弥漫…');
+  }
+  if(weather.type==='rain'||weather.type==='thunder'){
+    scene.fog.density=0.0022;
+    player.wet=Math.max(player.wet,1);
+    const pos=rainSys.geo.attributes.position.array;
+    for(let i=0;i<rainSys.count;i++){
+      const idx=i*3;
+      if(pos[idx+1]<player.pos.y-25||rainSys.life[i]<=0){
+        pos[idx]=player.pos.x+rand(-80,80); pos[idx+1]=player.pos.y+rand(25,70); pos[idx+2]=player.pos.z+rand(-80,80);
+        rainSys.life[i]=1;
+      }
+      pos[idx+1]-=70*dt;
+    }
+    rainSys.geo.attributes.position.needsUpdate=true;
+    rainSys.pts.material.opacity=0.45;
+    if(weather.type==='thunder'&&Math.random()<dt*0.02){
+      const lx=player.pos.x+rand(-40,40), lz=player.pos.z+rand(-40,40);
+      emitParticles(sparkSys,lx,player.pos.y+30,lz,100,15,0.8,new THREE.Color(0xffdd44));
+      SFX.thunder();
+      if(currentWeapon&&currentWeapon.type==='sword'&&!currentWeapon.id.includes('master')){
+        const lb=getArmorBonus();
+        if(lb.lightning){ toast('雷光头盔引开了雷电'); }
+        else if(lb.shock){ toast('橡胶套装绝缘了雷电'); }
+        else { damagePlayer(2,'shock'); toast('金属武器引雷！'); }
+      }
+    }
+  } else {
+    rainSys.pts.material.opacity=0;
+    scene.fog.density=weather.type==='fog'?0.0045:0.00068;
+  }
+  updateTemperature(dt);
+  updateBirds(dt);
+  updateFireflies(dt,now);
+}
+const _toonLightDir=new THREE.Vector3();
+function updateToonLightDir(lightDir, ambientScale=1, lightScale=1, night=0){
+  _toonLightDir.copy(lightDir).normalize();
+  const windTime=performance.now()*0.001;
+  const fog=scene.fog;
+  for(const mat of TOON_MATERIALS){
+    if(mat.uniforms&&mat.uniforms.uLightDir) mat.uniforms.uLightDir.value.copy(_toonLightDir);
+    if(mat.uniforms&&mat.uniforms.uLightI) mat.uniforms.uLightI.value=lightScale;
+    if(mat.uniforms&&mat.uniforms.uNight) mat.uniforms.uNight.value=night;
+    if(mat.uniforms&&mat.uniforms.uAmbient){
+      if(mat.userData.baseAmbient===undefined) mat.userData.baseAmbient=mat.uniforms.uAmbient.value;
+      mat.uniforms.uAmbient.value=mat.userData.baseAmbient*ambientScale;
+    }
+    if(mat.uniforms&&mat.uniforms.uTime) mat.uniforms.uTime.value=windTime;
+    if(mat.uniforms&&mat.uniforms.uFogColor&&fog){ mat.uniforms.uFogColor.value.copy(fog.color); mat.uniforms.uFogDensity.value=fog.density||0.0012; }
+  }
+}
+
+// ============================================================
+// 相机
+// ============================================================
+function cameraObstruct(target,dir,maxDist){
+  let best=maxDist;
+  const steps=20;
+  const p=new THREE.Vector3();
+  for(let i=1;i<=steps;i++){
+    const d=maxDist*i/steps;
+    p.copy(target).addScaledVector(dir,d);
+    if(p.y<terrainHeight(p.x,p.z)+0.55){ best=Math.max(1.5,d-0.45); break; }
+    for(const c of collidables){
+      if(!c.radius||c.type==='chest'||c.type==='signpost') continue;
+      if(p.y<c.pos.y-0.2||p.y>c.pos.y+c.height+0.2) continue;
+      if(Math.hypot(p.x-c.pos.x,p.z-c.pos.z)<c.radius+0.25){ best=Math.max(1.5,d-0.45); break; }
+    }
+    if(best<maxDist) break;
+  }
+  return best;
+}
+function updateCamera(dt){
+  const riding=player.riding&&activeHorse;
+  const targetPos=(riding?activeHorse.pos.clone():player.pos.clone()).add(new THREE.Vector3(0,riding?1.85:1.45,0));
+  const offset=new THREE.Vector3(
+    Math.sin(camYaw)*Math.cos(camPitch),
+    Math.sin(camPitch),
+    Math.cos(camYaw)*Math.cos(camPitch)
+  );
+  const dir=offset.clone().normalize();
+  const wantDist=riding?Math.max(camDist,8):camDist;
+  const maxAllowed=cameraObstruct(targetPos,dir,wantDist+0.5);
+  const desiredDist=Math.min(wantDist,maxAllowed);
+  if(desiredDist<player.camDistCur) player.camDistCur=lerp(player.camDistCur,desiredDist,0.55);
+  else player.camDistCur=lerp(player.camDistCur,desiredDist,1-Math.exp(-3.2*dt));
+  const desired=targetPos.clone().addScaledVector(dir,player.camDistCur);
+  const gh=terrainHeight(desired.x,desired.z)+0.8;
+  if(desired.y<gh) desired.y=gh;
+  camera.position.lerp(desired,1-Math.pow(0.00001,dt));
+  camera.lookAt(targetPos.x,targetPos.y+(riding?0.15:0.05),targetPos.z);
+}
+
+// ============================================================
+// UI
+// ============================================================
+function buildHearts(){
+  const wrap=$('hearts'); wrap.innerHTML='';
+  for(let i=0;i<Math.max(player.maxHp,13);i++){
+    const d=document.createElement('div'); d.className='heart';
+    d.innerHTML=`<svg viewBox="0 0 24 24"><path d="M12 21s-7-4.6-9.5-8.2C.4 9.6 1.8 5.5 5.5 5.5c2 0 3.5 1.1 4.5 2.6 1-1.5 2.5-2.6 4.5-2.6 3.7 0 5.1 4.1 3 7.3C19 16.4 12 21 12 21z" fill="#d94a3a" stroke="#2a0a0a" stroke-width="1"/></svg>`;
+    wrap.appendChild(d);
+  }
+}
+function updateHearts(){
+  const hearts=$('hearts').children;
+  for(let i=0;i<hearts.length;i++){
+    const filled=i<player.hp, isExtra=i>=player.maxHp;
+    hearts[i].style.opacity=(i<player.maxHp||i<player.hp)?'1':'0.18';
+    const path=hearts[i].querySelector('path');
+    if(path) path.setAttribute('fill',(isExtra&&i<player.hp)?'#ffdd44':filled?'#d94a3a':'#333');
+  }
+}
+function buildRuneUI(){
+  const bar=$('runeBar'); bar.innerHTML='';
+  RUNES.forEach((r,i)=>{
+    const d=document.createElement('div'); d.className='rune-slot'+(i===activeRune?' active':'');
+    d.innerHTML=`<div class="glyph">${r.glyph}</div><div>${r.name}</div><div class="cd" style="height:0%"></div>`;
+    d.addEventListener('click',()=>{ activeRune=i; updateRuneUI(); useRune(); }); bar.appendChild(d);
+  });
+}
+function updateRuneUI(){ [...$('runeBar').children].forEach((el,i)=>el.classList.toggle('active',i===activeRune)); }
+let _runeCdT=0, _runeCdPct=[];
+function updateRuneCooldowns(){
+  const now=performance.now();
+  if(now-_runeCdT<90) return;
+  _runeCdT=now;
+  [...$('runeBar').children].forEach((el,i)=>{
+    const r=RUNES[i]; if(!r) return;
+    const pct=Math.round(clamp(r.cdLeft/r.cd,0,1)*100);
+    if(_runeCdPct[i]===pct) return;
+    _runeCdPct[i]=pct;
+    const cd=el.querySelector('.cd');
+    if(cd) cd.style.height=pct+'%';
+  });
+}
+buildHearts(); buildRuneUI(); updateHearts();
+
+// ============================================================
+// ★ 多语言 / 画质设置 界面
+// ============================================================
+const I18N = window.BOTW_I18N || { langs:[{id:'zh-CN',name:'简体中文'}], current:'zh-CN', t:(s)=>s, name:(s)=>s, setLang:()=>{}, cycle:()=>{}, translateDOM:()=>{} };
+function buildLanguageUI(){
+  const row=$('langRow'); if(!row) return;
+  row.innerHTML='';
+  I18N.langs.forEach(l=>{
+    const b=document.createElement('button');
+    b.className='langBtn'+(I18N.current===l.id?' active':'');
+    b.dataset.lang=l.id;
+    b.textContent=l.nativeName||l.name;
+    b.addEventListener('click',e=>{
+      e.stopPropagation(); e.preventDefault();
+      if(I18N.current===l.id) return;
+      I18N.setLang(l.id);
+    });
+    row.appendChild(b);
+  });
+}
+function redrawNpcLabels(){
+  if(typeof npcs==='undefined') return;
+  npcs.forEach(n=>{
+    if(!n.labelCtx) return;
+    paintNpcLabel(n.labelCtx, I18N.name(n.name));
+    if(n.labelTex) n.labelTex.needsUpdate=true;
+  });
+}
+function onLanguageChanged(){
+  buildLanguageUI();
+  try{
+    redrawNpcLabels();
+    buildRuneUI();
+    if(typeof buildChampionHUD==='function') buildChampionHUD();
+    updateQuestHUD();
+    if(currentArmor) applyArmor(currentArmor.id,true);
+    updateWeaponHUD();
+    updateInteractHint();
+    drawMinimap(true);
+    if(mapOpen) drawMap();
+    if(typeof invOpen!=='undefined'&&invOpen){ renderInvTabs(); renderInvList(); renderInvDetail(invSelected); }
+    if(typeof cookOpen!=='undefined'&&cookOpen) renderCookUI();
+    if($('compOverlay').style.display==='flex') renderCompendium();
+  }catch(err){ console.warn('[i18n] refresh failed', err); }
+  try{ localStorage.setItem('botw_language',I18N.current); }catch(e){}
+}
+window.addEventListener('botw:lang', ()=>setTimeout(onLanguageChanged,0));
+function toggleHelp(){
+  const el=$('mapHint'); if(!el) return;
+  const show=el.style.display!=='block';
+  el.style.display=show?'block':'none';
+}
+const helpChip=$('helpChip');
+if(helpChip) helpChip.addEventListener('click',e=>{ e.stopPropagation(); toggleHelp(); });
+buildLanguageUI();
+if(I18N.current!=='zh-CN'){
+  // 静态文本已在 i18n 脚本里翻译；这里刷新 3D 名牌与动态 HUD
+  setTimeout(onLanguageChanged, 0);
+}
+
+// ============================================================
+// ★ 后台连接 / 云存档 / 玩家档案
+// ============================================================
+function updateNetUI(online){
+  const dot=$('netDot'), st=$('netStatus'), pn=$('profileName');
+  if(dot) dot.className='netDot '+(online?'on':'off');
+  if(st) st.textContent = online ? '云端已连接' : '本地存档模式';
+  if(pn && window.BOTW_API){
+    let nick = window.BOTW_API.getNickname ? window.BOTW_API.getNickname() : '旅人';
+    pn.textContent = nick;
+    pn.title = window.BOTW_API.getProfileId ? window.BOTW_API.getProfileId() : '';
+    pn.style.pointerEvents='auto'; pn.style.cursor='pointer';
+    pn.onclick = (e)=>{
+      e.stopPropagation();
+      const v=prompt('旅人名字 / Traveler name', nick);
+      if(v && window.BOTW_API.setNickname){ window.BOTW_API.setNickname(v.slice(0,24)); updateNetUI(window.BOTW_API.online); }
+    };
+  }
+}
+async function initBackend(){
+  if(!window.BOTW_API){ updateNetUI(false); return; }
+  const api=window.BOTW_API;
+  updateNetUI(api.online);
+  window.addEventListener('botw:net', e=>updateNetUI(!!(e.detail&&e.detail.online)));
+  try{
+    await api.health();
+    updateNetUI(true);
+    refreshLeaderboard();
+    try{
+      const cfg=await api.config();
+      if(cfg && cfg.features) console.log('[server] connected', api.base, cfg.languages && cfg.languages.length);
+    }catch(_){}
+    // 本地没有存档时，尝试拉取云端存档（先查 profile，避免 404 噪声）
+    if(!localStorage.getItem('botw_v7_save')){
+      try{
+        const prof=await api.profile(api.getProfileId());
+        const hasAuto=prof && prof.slots && prof.slots.some(x=>x.slot==='auto');
+        if(hasAuto){
+          const cloud=await api.cloudLoad('auto');
+          if(cloud){
+            localStorage.setItem('botw_v7_save', JSON.stringify(cloud));
+            toast('云端存档已同步');
+          }
+        }
+      }catch(_){}
+    }
+  }catch(err){
+    updateNetUI(false);
+    console.info('[server] offline mode', api.base);
+  }
+}
+
+// ============================================================
+// ★ 画质自适应 / 性能
+// ============================================================
+const QUALITY_PRESETS={
+  high:{ pr:1.5, shadow:true, grass:true, clouds:true },
+  medium:{ pr:1.05, shadow:true, grass:true, clouds:true },
+  low:{ pr:0.72, shadow:false, grass:false, clouds:false }
+};
+let qualityMode='auto', qualityLevel='high', _qualityT=0, _qualityGood=0;
+try{
+  const qp=new URLSearchParams(location.search).get('quality');
+  qualityMode = (qp && QUALITY_PRESETS[qp]) ? qp : (localStorage.getItem('botw_quality')||'auto');
+}catch(e){}
+function applyQualityLevel(level){
+  const q=QUALITY_PRESETS[level]||QUALITY_PRESETS.high;
+  qualityLevel=level;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio||1, q.pr));
+  renderer.setSize(innerWidth,innerHeight);
+  renderer.shadowMap.enabled=q.shadow;
+  const shadowSize=level==='high'?3072:2048;
+  if(q.shadow && sun.shadow.mapSize.x!==shadowSize){
+    sun.shadow.mapSize.set(shadowSize,shadowSize);
+    if(sun.shadow.map){ sun.shadow.map.dispose(); sun.shadow.map=null; }
+    renderer.shadowMap.needsUpdate=true;
+  }
+  if(q.shadow) renderer.shadowMap.needsUpdate=true;
+  if(grassMeshRef) grassMeshRef.visible=q.grass;
+  if(cloudMeshRef) cloudMeshRef.visible=q.clouds;
+  updateQualityUI();
+}
+function updateQualityUI(){
+  document.querySelectorAll('.qualityBtn').forEach(b=>b.classList.toggle('active', b.dataset.quality===qualityMode));
+}
+function applyQuality(mode, silent){
+  if(!QUALITY_PRESETS[mode] && mode!=='auto') mode='auto';
+  qualityMode=mode;
+  try{ localStorage.setItem('botw_quality',mode); }catch(e){}
+  applyQualityLevel(mode==='auto'?'high':mode);
+  if(!silent) toast('画质已切换');
+}
+function autoAdjustQuality(dt){
+  if(qualityMode!=='auto') return;
+  _qualityT+=dt;
+  if(_qualityT<2.5) return;
+  _qualityT=0;
+  const fps=window.__FPS__||60;
+  if(fps<38 && qualityLevel!=='low'){ applyQualityLevel(qualityLevel==='high'?'medium':'low'); }
+  else if(fps>56){
+    _qualityGood++;
+    if(_qualityGood>=4 && qualityLevel!=='high'){ applyQualityLevel(qualityLevel==='low'?'medium':'high'); _qualityGood=0; }
+  } else _qualityGood=0;
+}
+document.querySelectorAll('.qualityBtn').forEach(b=>{
+  b.addEventListener('click',e=>{ e.stopPropagation(); applyQuality(b.dataset.quality); });
+});
+
+
+$('mapCloseBtn').addEventListener('click',e=>{ e.stopPropagation(); closeMap(); });
+$('mapOverlay').addEventListener('click',e=>{ if(e.target===$('mapOverlay')) closeMap(); });
+$('invCloseBtn').addEventListener('click',closeInventory);
+$('invOverlay').addEventListener('click',e=>{ if(e.target===$('invOverlay')) closeInventory(); });
+$('cookCloseBtn').addEventListener('click',closeCook);
+$('cookBtn').addEventListener('click',doCook);
+$('cookClearBtn').addEventListener('click',()=>{ cookSlots=[]; renderCookUI(); });
+$('compCloseBtn').addEventListener('click',closeCompendium);
+$('compOverlay').addEventListener('click',e=>{ if(e.target===$('compOverlay')) closeCompendium(); });
+$('shrineCloseBtn').addEventListener('click',closeShrinePuzzle);
+
+// ============================================================
+// 存档
+// ============================================================
+function saveGame(){
+  const data={
+    pos:[player.pos.x,player.pos.y,player.pos.z],
+    hp:player.hp,maxHp:player.maxHp,stamina:player.stamina,yaw:player.yaw,time:timeOfDay,
+    openedChests:chests.map(c=>c.opened),
+    activatedShrines:shrines.map(s=>s.activated),
+    shrineCleared:shrines.map(s=>s.challengeCleared),
+    activatedTowers:towers.map(t=>!!t.activated),
+    koroks:koroks.map(k=>k.collected),
+    memories:memorySpots.map(m=>m.collected),
+    quest:{...quest,divineCleared:{...quest.divineCleared}},
+    masterSword:hasMasterSword,korokSeeds:player.korokSeeds,trialPass:player.trialPass,
+    championIds:championSkills.map(s=>s.id),
+    inventoryWeapons:inventory.weapons.map(w=>({id:w.id,curDur:w.curDur})),
+    inventoryShields:inventory.shields.map(s=>({id:s.id,curDur:s.curDur})),
+    inventoryBows:inventory.bows.map(b=>({id:b.id,curDur:b.curDur})),
+    inventoryMats:inventory.materials.map(m=>({id:m.id,qty:m.qty})),
+    inventoryFood:inventory.food,
+    currentShieldId:currentShield?currentShield.id:null,
+    currentWeaponId:currentWeapon?currentWeapon.id:null,
+    armorId:currentArmor?currentArmor.id:null,
+    arrows:{...arrowInventory},currentArrow,
+    masterCycle:masterCycle?{pos:[masterCycle.pos.x,masterCycle.pos.y,masterCycle.pos.z],yaw:masterCycle.yaw}:null,
+    horses:horses.map(h=>({name:h.name,pos:[h.pos.x,h.pos.y,h.pos.z],yaw:h.yaw,stamina:h.stamina,bond:h.bond})),
+  };
+  localStorage.setItem('botw_v7_save',JSON.stringify(data)); toast('已存档');
+  if(window.BOTW_API && window.BOTW_API.online){
+    window.BOTW_API.cloudSave('auto', data, {summary:{koroks:player.korokSeeds,hearts:player.maxHp,stage:quest.stage}})
+      .then(ok=>{ try{ toast(ok?'已存档（云端）':'同步失败'); }catch(_){} })
+      .catch(()=>{ try{ toast('同步失败'); }catch(_){} });
+  }
+}
+function loadGame(){
+  const raw=localStorage.getItem('botw_v7_save')||localStorage.getItem('botw_v6_save');
+  if(!raw){
+    if(window.BOTW_API){
+      toast('没有存档 · 正在读取云端…');
+      window.BOTW_API.cloudLoad('auto').then(c=>{
+        if(c){
+          try{ localStorage.setItem('botw_v7_save',JSON.stringify(c)); }catch(_){}
+          toast('云端存档已同步'); loadGame();
+        } else toast('没有存档');
+      }).catch(()=>toast('没有存档'));
+    } else toast('没有存档');
+    return;
+  }
+  try{
+    const d=JSON.parse(raw);
+    if(player.riding) dismountHorse(true);
+    player.pos.set(d.pos[0],d.pos[1],d.pos[2]);
+    player.hp=d.hp; player.maxHp=d.maxHp; player.stamina=d.stamina; player.yaw=d.yaw; timeOfDay=d.time;
+    (d.openedChests||[]).forEach((o,i)=>{ if(chests[i]&&o){ chests[i].opened=true; chests[i].lid.rotation.x=-1.4; }});
+    (d.activatedShrines||[]).forEach((a,i)=>{ if(shrines[i]&&a) activateShrine(shrines[i],true); });
+    (d.shrineCleared||[]).forEach((c,i)=>{ if(shrines[i]&&c) shrines[i].challengeCleared=true; });
+    (d.activatedTowers||[]).forEach((c,i)=>{ if(towers[i]&&c) activateTower(towers[i],true); });
+    (d.koroks||[]).forEach((c,i)=>{ if(koroks[i]&&c){ koroks[i].collected=true; koroks[i].group.visible=false; }});
+    (d.memories||[]).forEach((c,i)=>{ if(memorySpots[i]&&c){ memorySpots[i].collected=true; memorySpots[i].group.visible=false; }});
+    if(d.quest) Object.assign(quest,d.quest);
+    if(d.masterSword){ hasMasterSword=true; player.parts.sword.visible=true; }
+    if(d.korokSeeds) player.korokSeeds=d.korokSeeds;
+    if(d.trialPass) player.trialPass=d.trialPass;
+    if(d.arrows){ Object.keys(arrowInventory).forEach(k=>{ if(d.arrows[k]!==undefined) arrowInventory[k]=d.arrows[k]; }); }
+    if(typeof d.currentArrow==='number') currentArrow=clamp(d.currentArrow,0,ARROW_TYPES.length-1);
+    if(d.quest&&d.quest.dlcActive&&d.quest.dlcStage===1&&dlcCamps.length===0){ spawnDLCCamps(); }
+    if(d.masterCycle){ masterCycle=makeMasterCycle(d.masterCycle.pos[0],d.masterCycle.pos[2]); masterCycle.pos.set(d.masterCycle.pos[0],d.masterCycle.pos[1],d.masterCycle.pos[2]); masterCycle.group.position.copy(masterCycle.pos); masterCycle.yaw=d.masterCycle.yaw||0; masterCycle.group.rotation.y=masterCycle.yaw; }
+    else if(d.quest&&d.quest.dlcMasterCycle&&!masterCycle){ masterCycle=makeMasterCycle(LANDMARKS.dlcShrine.x+7,LANDMARKS.dlcShrine.z+4); }
+    updateArrowHUD();
+    (d.championIds||[]).forEach(id=>grantChampionSkill(id));
+    if(d.inventoryWeapons){ inventory.weapons=d.inventoryWeapons.map(x=>{ const def=WEAPON_DEFS.find(w=>w.id===x.id); return def?{...def,curDur:x.curDur,qty:1}:null; }).filter(Boolean); currentWeapon=inventory.weapons[0]||null; }
+    {
+      const ms0=inventory.weapons.find(w=>w.id==='master_sword');
+      if(ms0){ const t=quest.trialSwordTier||0; ms0.atk=t>=3?100:60+t*8; }
+    }
+    if(d.inventoryShields){ inventory.shields=d.inventoryShields.map(x=>{ const def=SHIELD_DEFS.find(s=>s.id===x.id); return def?{...def,curDur:x.curDur,qty:1}:null; }).filter(Boolean); currentShield=inventory.shields[0]||null; }
+    if(d.inventoryBows){ inventory.bows=d.inventoryBows.map(x=>{ const def=BOW_DEFS.find(b=>b.id===x.id); return def?{...def,curDur:x.curDur,qty:1}:null; }).filter(Boolean); currentBow=inventory.bows[0]||null; }
+    if(d.inventoryMats){ d.inventoryMats.forEach(x=>{ const m=inventory.materials.find(mm=>mm.id===x.id); if(m) m.qty=x.qty; }); }
+    if(d.inventoryFood) inventory.food=d.inventoryFood;
+    if(d.currentShieldId){ const s=inventory.shields.find(x=>x.id===d.currentShieldId); if(s) currentShield=s; }
+    if(d.currentWeaponId){ const w=inventory.weapons.find(x=>x.id===d.currentWeaponId); if(w) currentWeapon=w; }
+    if(d.armorId) applyArmor(d.armorId,true);
+    player.state='idle'; player.riding=false; activeHorse=null;
+    ridingCycle=false; player.group.visible=true;
+    $('deathOverlay').style.display='none';
+    if(player.parts.visual) player.parts.visual.rotation.set(0,0,0);
+    if(player.parts.slope) player.parts.slope.rotation.set(0,0,0);
+    if(d.horses) d.horses.forEach((hd,i)=>{
+      const h=horses[i]; if(!h) return;
+      if(hd.name) h.name=hd.name;
+      h.pos.set(hd.pos[0],hd.pos[1],hd.pos[2]);
+      h.yaw=hd.yaw||0; h.stamina=hd.stamina!==undefined?hd.stamina:1; h.bond=hd.bond||100;
+      h.group.position.copy(h.pos); h.group.rotation.y=h.yaw; h.anchor=h.pos.clone();
+    });
+    buildHearts(); updateHearts(); updateQuestHUD(); toast('已读档');
+  }catch(e){ toast('存档损坏'); }
+}
+window.addEventListener('keydown',e=>{
+  if(e.code==='F5'){ e.preventDefault(); saveGame(); }
+  if(e.code==='F9'){ e.preventDefault(); loadGame(); }
+});
+
+// ============================================================
+// 主循环
+// ============================================================
+const URLP=new URLSearchParams(location.search);
+let GAME_STARTED=false;
+const INSPECT_MODE=URLP.get('inspect')==='1';
+const BENCH_MODE=URLP.get('bench')==='1';
+let LOOP_ACTIVE=true, _frameCount=0, _benchStartT=0, _benchDts=[];
+let _vignetteLow=null;
+let lastT=performance.now(), clockTime=0;
+let _fpsFrames=0, _fpsT=performance.now(), _fpsValue=0;
+function loop(){
+  if(!LOOP_ACTIVE) return;
+  requestAnimationFrame(loop);
+  const now=performance.now();
+  _fpsFrames++;
+  if(now-_fpsT>=600){ _fpsValue=Math.round(_fpsFrames*1000/(now-_fpsT)); _fpsFrames=0; _fpsT=now; window.__FPS__=_fpsValue; const fh=$('fpsHud'); if(fh && fh.style.display!=='none') fh.textContent='FPS '+_fpsValue+' · '+renderer.info.render.calls+' calls · '+Math.round(renderer.info.render.triangles/1000)+'k tris';
+  }
+  let dt=(now-lastT)/1000; lastT=now;
+  dt=Math.min(dt,0.05); clockTime+=dt;
+  autoAdjustQuality(dt);
+
+  if(!GAME_STARTED){ return; }
+
+  const wdt = player.flurryT>0 ? dt*0.26 : (player.bulletTime ? dt*0.45 : dt);
+  if(!dialogActive&&!mapOpen&&!invOpen&&!cookOpen&&!journalOpen&&!teleporting&&$('compOverlay').style.display!=='flex'&&$('shrineOverlay').style.display!=='flex'){
+    updatePlayer(dt); updateMonsters(wdt); updateProjectiles(wdt);
+  } else if(dialogActive||teleporting||player.state==='dead'){
+    animatePlayer(dt,false,false); updateProjectiles(wdt);
+  } else {
+    updateTeleportFX(dt); updateParticles(dt); updateSlashArcs(dt);
+  }
+  updatePhysicsProps(dt);
+  updateBossOrbs(wdt);
+  updateDLC(dt);
+  updateSwordTrial(dt);
+  updateHorses(dt);
+  updateNPCs(dt);
+  updateEnvironment(dt);
+  updateFirePatches(dt);
+  updateAmbient(dt);
+  updateCamera(dt);
+  const slowVision = player.flurryT>0||player.bulletTime;
+  const tint=$('slowmoTint');
+  if(tint){ tint.classList.toggle('on',slowVision); tint.classList.toggle('bullet',player.bulletTime&&player.flurryT<=0); }
+  const btint=$('bloodTint');
+  if(btint) btint.classList.toggle('on',bloodMoonT>0);
+  const fh=$('flurryHud');
+  if(fh){
+    const showFlurry=player.flurryT>0;
+    fh.classList.toggle('show',showFlurry);
+    if(showFlurry){ const fill=$('flurryFill'); if(fill) fill.style.width=clamp(player.flurryT/2.8,0,1)*100+'%'; }
+  }
+  darukBubble.visible=player.darukCharges>0;
+  if(darukBubble.visible){ const bt=performance.now()*0.002; darukBubble.scale.setScalar(1+Math.sin(bt)*0.03); darukBubble.material.opacity=0.08+Math.sin(bt*1.7)*0.035; }
+  if(jointDebug.visible){
+    const _jt0=performance.now();
+    updateJointNodePool();
+    updateJointGPU();
+    jointGPU.cpuMs=(jointGPU.cpuMs||0)*0.85+(performance.now()-_jt0)*0.15;
+  }else if(jointNodePool.chars.length){
+    for(const m of jointNodePool.chars.slice()) releaseJointNodes(m);
+    jointGPU.slots=[]; jointGPU.geo.instanceCount=0; jointGPU.mesh.visible=false; jointGPU.dirty=true;
+  }
+  updateJointDebug();
+  updateObjective(dt, clockTime);
+  updateStaminaHUD();
+  drawStaminaWheel();
+  updateInteractHint();
+
+  updateMonsterHpBars();
+  updateMinimapData(dt);
+  drawMinimap();
+
+  monsters.forEach(m=>{
+    if(m.type==='guardian'||m.type==='flyingGuardian'){
+      if(m.parts&&m.parts.eye){
+        if(m.laserState==='charge') m.parts.eye.scale.setScalar(1+clamp((m.laserT||0)/1.4,0,1)*0.36);
+        else m.parts.eye.scale.setScalar(1);
+      }
+    }
+  });
+
+  const lowHp=player.hp<=Math.max(1,Math.floor(player.maxHp*0.3));
+  if(lowHp!==_vignetteLow){
+    _vignetteLow=lowHp;
+    $('vignette').style.background=lowHp
+      ?`radial-gradient(ellipse at center, transparent 40%, rgba(180,20,20,${0.35+Math.sin(clockTime*6)*0.1}) 100%)`
+      :'radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.35) 100%)';
+  }
+
+  const modalOpen=mapOpen||invOpen||cookOpen||journalOpen||$('compOverlay').style.display==='flex'||$('shrineOverlay').style.display==='flex'||$('memoryOverlay').style.display==='flex';
+  if(renderer.shadowMap.enabled && (_frameCount&1)===0) renderer.shadowMap.needsUpdate=true;
+  if(!modalOpen) renderer.render(scene,camera);
+  _frameCount++;
+  if(BENCH_MODE && GAME_STARTED){
+    if(_benchStartT===0){ _benchStartT=now; _benchDts=[]; }
+    else { _benchDts.push(dt*1000); }
+    if(now-_benchStartT>8000 && _benchDts.length>10){
+      const sorted=_benchDts.slice().sort((a,b)=>a-b);
+      const avg=sorted.reduce((a,b)=>a+b,0)/sorted.length;
+      window.__BENCH__={ mode:'headless', avgFrameMs:+avg.toFixed(2), avgFps:+(1000/avg).toFixed(1), p95FrameMs:+sorted[Math.floor(sorted.length*0.95)].toFixed(2), frames:sorted.length, calls:renderer.info.render.calls, tris:renderer.info.render.triangles, drawCalls:renderer.info.render.calls };
+      document.title='BENCH '+JSON.stringify(window.__BENCH__);
+      LOOP_ACTIVE=false;
+      console.log('[bench]', JSON.stringify(window.__BENCH__));
+    }
+  }
+  if(INSPECT_MODE && _frameCount>120 && _benchStartT===0){ window.__INSPECT_READY__=true; LOOP_ACTIVE=false; console.log('[inspect] paused at frame', _frameCount); }
+}
+optimizeShadowCasters(scene);
+await buildMapCacheAsync();
+await loadingStep(0.95,'准备就绪');
+finishLoading();
+initBackend();
+applyQuality(qualityMode, true);
+snapCameraToPlayer();
+// one wide, scenic frame behind the title screen
+(function(){
+  try{ updateEnvironment(0.016); }catch(e){ window.__TITLE_ERR__=String(e&&e.stack||e); console.warn('title environment',e); }
+  // The title frame is scenery only; world labels appear once the adventure starts.
+  try{ npcs.forEach(n=>{ if(n.label) n.label.visible=false; if(n.questMark) n.questMark.visible=false; }); }catch(e){}
+  const look=player.pos.clone().add(new THREE.Vector3(5,-4,-36));
+  camera.position.set(player.pos.x-8,player.pos.y+9,player.pos.z+15);
+  camera.lookAt(look);
+  renderer.render(scene,camera);
+})();
+snapCameraToPlayer();
+loop();
+
+// 调试接口（用于自动化测试与性能诊断）
+if(new URLSearchParams(location.search).get('joints')==='1') setTimeout(toggleJointDebug,600);
+if(URLP.get('autostart')==='1'){
+  setTimeout(()=>{
+    if(!GAME_STARTED){
+      const ov=$('startOverlay');
+      if(ov) ov.style.transition='none';
+      if(ov) ov.click();
+      if(ov) ov.style.display='none';
+    }
+  },80);
+}
+window.BOTW_DEBUG={ player, camera, renderer, scene, monsters, chests, collidables, npcs, shrines, quest, LANDMARKS, terrainHeight, waterLevel: WATER_LEVEL, joints: player.joints, jointFieldStats: ()=>({player:player.joints.length, playerJointCount:player.jointCount, monsters:monsters.filter(m=>m.joints).length, perMonster:1024, monsterJointTotal:monsters.filter(m=>m.joints).length*1024, realNodes:jointNodePool.chars.reduce((a,m)=>a+(m.jointNodes?m.jointNodes.nodes.length:0),0), pooledChars:jointNodePool.chars.length, gpuInstances:jointGPU.geo.instanceCount, gpuDrawCalls:jointGPU.mesh.visible?1:0, cpuMs:+(jointGPU.cpuMs||0).toFixed(3)}), physics, physicsProps, beginCarry, endCarry, throwBomb, useStasis, toggleMagnesis, useCryonis, explodeAt,
+  report(){ const m={}; scene.traverse(o=>{ if(!(o.isMesh||o.isPoints||o.isLine||o.isSprite)) return; let top=o; while(top.parent&&top.parent!==scene) top=top.parent; const k=(top.name||top.type||'?')+(o.isInstancedMesh?'[i]':''); m[k]=(m[k]||0)+1; }); return m; },
+  reportVisible(){ const m={}; scene.traverseVisible(o=>{ if(!(o.isMesh||o.isPoints||o.isLine||o.isSprite)) return; let top=o; while(top.parent&&top.parent!==scene) top=top.parent; const k=(top.name||top.type||'?')+(o.isInstancedMesh?'[i]':''); m[k]=(m[k]||0)+1; }); return m; },
+  stepFX:(sec)=>{ const n=Math.max(1,Math.round(sec/0.016)); for(let i=0;i<n;i++){ updateRuneFX(0.016); updateParticles(0.016); } return n; },
+  openMap, closeMap, drawMap, toggleJointDebug, toggleHelp, triggerBloodMoon, triggerFlurryRush, damagePlayer, unstickPlayer, openInventory, closeInventory, openCook, closeCook, openCompendium, closeCompendium, saveGame, loadGame, openJournal, closeJournal, startVirtualShrine, solveShrine, startDLC, startMazKoshiaFight, startChampionsSongTrial, startSwordTrial, activateTower, spawnKeese, spawnHinox, spawnMolduga, spawnKohga, grantMaterial, spawnDLCCamps, updateDLC, updateSwordTrial, damageMonster, spawnDivineBoss, igniteGrassAt, updateFirePatches, setTime:(t)=>{timeOfDay=t;}, setWeather:(w)=>{weather.type=w; weather.t=0; weather.next=999;},
+  setCam:(y,p,d)=>{ camYaw=y; camPitch=p; camDist=d; player.camDistCur=d; snapCameraToPlayer(); },
+  tryInteract, nextDialog, startDialog, closeDialog,
+  setLang:(l)=>I18N.setLang(l), setQuality:(q)=>applyQuality(q,true), teleportTo, get fps(){ return window.__FPS__; }, get cam(){ return {yaw:camYaw,pitch:camPitch,dist:camDist,cur:player.camDistCur}; },
+  get tod(){return timeOfDay;}, get sunState(){return {pos:sun.position.toArray(),intensity:sun.intensity,hemi:hemi.intensity,skyTop:skyUniforms.topColor.value.getHexString(),skyBottom:skyUniforms.bottomColor.value.getHexString(),fog:scene.fog.density};},
+  get masterCycle(){return masterCycle;}, get ridingCycle(){return ridingCycle;}, summonMasterCycle, mountMasterCycle, dismountMasterCycle };
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight);
+});
+
+

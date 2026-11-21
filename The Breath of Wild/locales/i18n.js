@@ -1,0 +1,484 @@
+/*!
+ * Breath of the Wild fan remake — i18n runtime (zh-CN / en / ja / zh-TW)
+ * Loaded as a classic script before the game module so it also works from file://.
+ * The dictionary is embedded; no network request is required.
+ */
+(function () {
+  'use strict';
+  const DATA = {"version":1,"langs":[{"id":"zh-CN","name":"简体中文","nativeName":"简体中文"},{"id":"zh-TW","name":"繁體中文","nativeName":"繁體中文"},{"id":"en","name":"English","nativeName":"English"},{"id":"ja","name":"日本語","nativeName":"日本語"}],"dict":{"en":{"与":"Talk to ","分":" min ","心":"hearts","火":"Fire","雷":"Thunder","关闭":"Close","回忆":"Memories","夜影":"Nightshade","对话":"Dialogue","帕雅":"Paya","攻击":"Attack","暖暖":"Spicy","木盾":"Wooden Shield","栗风":"Chestnut Gale","潜行":"Stealth","白雪":"Snowdrift","离开":"Leave","精力":"Stamina","耐热":"Heat Resistance","草帽":"Straw Hat","赤焰":"Crimson","酥麻":"Electro","长枪":"Spear","颗。":"hearts.","魔物":"Monster","兽神弓":"Savage Lynel Bow","利特族":"Rito","力巴尔":"Revali","哈特尔":"Necluda","奥尔汀":"Eldin","已存档":"Saved","已解放":"Liberated","旅人剑":"Traveler's Sword","旧上衣":"Old Shirt","旧裤子":"Well-Worn Trousers","汀空帽":"Tingle's Hood","王族盾":"Royal Shield","精 力":"Stamina","莱尼尔":"Lynel","费罗尼":"Faron","雷电剑":"Thunderblade","骑士盾":"Knight's Shield","· 耐久":"· Durability","❄ 寒冷":"❄ Cold","休闲短裤":"Casual Shorts","兽神大剑":"Savage Lynel Crusher","利特驿站":"Rito Stable","卓拉套装":"Zora Set","卓拉领地":"Zora's Domain","双子驿站":"Dueling Peaks Stable","古代护腿":"Ancient Greaves","吹哨 ·":"Whistle ·","士兵之剑":"Soldier's Broadsword","士兵盔甲":"Soldier's Set","大师之剑":"Master Sword","岩石巨人":"Stone Talus","幻影护腿":"Phantom Greaves","必杀之剑":"One-Hit Obliterator","攀岩上衣":"Climbing Gear","攀岩裤子":"Climbing Boots","旅人之弓":"Traveler's Bow","暖暖草果":"Warm Safflina","橡胶套装":"Rubber Set","水咒盖侬":"Waterblight Ganon","沙滩短裤":"Beach Shorts","沙漠套装":"Desert Voe Set","没有盾牌":"No shield","湖之大桥":"Lake Bridge","滑翔兜帽":"Glider Hood","潜行上衣":"Stealth Chest Guard","潜行面罩":"Stealth Mask","灾厄盖侬":"Calamity Ganon","百年等待":"A Hundred-Year Wait","精力 +":"Stamina +","织梦岛衣":"Tunic of Awakening","英杰上衣":"Champion's Tunic","莱尼尔角":"Lynel Horn","蛮族头骨":"Barbarian Helm","蛮族胸甲":"Barbarian Armor","费罗尼塔":"Faron Tower","近卫护腿":"Royal Guard Boots","遥控炸弹":"Remote Bomb","防御 5":"Defense 5","防火护腿":"Flamebreaker Boots","雪地套装":"Snowquill Set","雪地羽裤":"Snowquill Trousers","雷光护腿":"Thunder Greaves","静谧公主":"Silent Princess","马匹精力":"Horse Stamina","骑士之弓":"Knight's Bow","鬼神胸甲":"Fierce Deity Armor","黑暗头巾":"Dark Hood","黑色丘丘":"Black Chuchu","· 骑乘中":"· Mounted","你倒下了…":"You have fallen…","初始台地塔":"Great Plateau Tower","呀哈哈藤裤":"Korok Vine Trousers","失去的战友":"Lost Comrades","无特殊效果":"No special effect","时之勇者裤":"Trousers of Time","格鲁德大桥":"Gerudo Bridge","格鲁德守卫":"Gerudo Guard","格鲁德驿站":"Gerudo Stable","波克布林角":"Bokoblin Horn","海利亚大桥":"Hylia Bridge","海布拉大桥":"Hebra Bridge","灾难的预兆":"Omen of Calamity","玛奥努神庙":"Maonu Shrine","离马匹太远":"Too far from your horse","米法的祈福":"Mipha's Grace","英杰的誓言":"The Champions' Oath","试炼通过证":"Spirit Orb","近卫兵套装":"Royal Guard Set","风之勇者帽":"Cap of the Wind","飞行守护者":"Guardian Skywatcher","中央海拉鲁塔":"Central Hyrule Tower","前往卓拉领地":"To Zora's Domain","卡卡利科驿站":"Kakariko Stable","古代兵装·盾":"Ancient Shield","塞尔达的呼唤":"Zelda's Call","天空之勇者裤":"Trousers of the Sky","时之勇者套装":"Hero of Time Set","海拉鲁的和平":"Peace in Hyrule","瓦摩达伊神庙":"Wamodai Shrine","白银蜥蜴战士":"Silver Lizalfos","红色波克布林":"Red Bokoblin","腐朽的守护者":"Decayed Guardian","蓝色莫力布林":"Blue Moblin","选择一件物品":"Select an item","风之勇者套装":"Hero of Winds Set","黄昏之勇者衣":"Tunic of Twilight","黄金蜥蜴战士":"Golden Lizalfos","黑色蜥蜴战士":"Black Lizalfos","你 倒 下 了":"YOU DIED","前往克洛格森林":"To Korok Forest","大师之剑的台座":"Pedestal of the Master Sword","攻击 +20%":"Attack +20%","最常见的魔物。":"The most common monster.","磁力 · 释放":"Magnesis · Release","英杰技能冷却中":"Champion ability recharging","进入海拉鲁城堡":"Enter Hyrule Castle","黄昏之勇者套装":"Hero of Twilight Set","Switch衬衫":"Switch Shirt","先解放四神兽吧。":"Free the four Divine Beasts first.","完成四座神庙试炼":"Complete four Shrine trials","尚未遇到任何魔物":"No monsters encountered yet","正面攻击无法偷袭":"You can't sneakstrike from the front","符文 · 制冰器":"Rune · Cryonis","该传送点尚未激活":"This travel point hasn't been activated yet","马匹不肯进入深水":"Your horse won't enter deep water","E / 点击 继续":"E / Click to continue","」已经托付给你了。":"\" has been entrusted to you.","传说中的最强盾牌。":"The strongest shield in legend.","士兵配发的金属盾。":"A metal shield issued to soldiers.","收集13颗心之容器":"Collect 13 Heart Containers","橡胶套装绝缘了雷电":"The Rubber Set insulated you from the lightning","熔岩锻造的魔法剑。":"A magic sword forged in lava.","精力耗尽，无法冲刺":"Out of stamina, can't dash","耐热 · 沙漠行动":"Heat Resistance · Desert Travel","雷光头盔引开了雷电":"The Thunder Helm diverted the lightning","口哨声传不到那么远（":"The whistle can't reach that far (","旅行者常用的单手剑。":"A one-handed sword commonly used by travelers.","神秘的力量尚未苏醒。":"The mysterious power has not yet awakened.","这是你的使命，林克。":"This is your mission, Link.","克洛格森林 · 大师剑":"Korok Forest · Master Sword","四咒盖侬之一就在前方。":"One of the four Blights is just ahead.","寒意刺骨…需要防寒装备":"Bitterly cold… you need cold-weather gear","无特殊效果 · 纪念装":"No special effect · Commemorative outfit","水之神兽 · 瓦·露塔":"Divine Beast Vah Ruta","点击 / 按 E 复活":"Click / press E to revive","王族流传的华丽单手剑。":"An ornate one-handed sword passed down through the royal family.","这里没有马匹落脚的地方":"There's no room for a horse here","静止器 · 未发现目标":"Stasis · No target found","……你身上的衣服真特别。":"……Your clothes are quite unusual.","击败它，解放英杰的灵魂。":"Defeat it and free the Champion's spirit.","制冰器 · 需在水边使用":"Cryonis · Must be used near water","欢迎来到卓拉领地，林克。":"Welcome to Zora's Domain, Link.","灾厄盖侬分身的四咒之一。":"One of the four Blights, a phantom of Calamity Ganon.","耐热 · 潜行 +20%":"Heat Resistance · Stealth +20%","（看来你需要特殊通行证）":"(It seems you need a special pass.)","「林克，你一定要活下去。」":"\"Link, you must live.\"","听说东边的山顶有个研究所。":"I hear there's a research lab on the mountain to the east.","攻击 +10% · 梦之岛":"Attack +10% · Dream Island","火 / 雷之神兽 · 剩余":"Fire / Thunder Divine Beasts · Remaining","米法大人……她一直在等你。":"Lady Mipha…… she has been waiting for you.","试炼通过 · 获得心之容器":"Trial complete · Heart Container obtained","雷雨来了…金属装备会引雷！":"A thunderstorm is coming… metal gear attracts lightning!","「大师之剑」已加入你的装备。":"\"Master Sword\" has been added to your equipment.","听说北边的雪山上住着莱尼尔。":"I hear a Lynel lives on the snowy mountain to the north.","塞尔达独自在城堡中牵制盖侬。":"Zelda is alone in the castle, holding Ganon back.","攻击 +10% · 王族威严":"Attack +10% · Royal Dignity","潜行 +20% · 奇装异服":"Stealth +20% · Outlandish Garb","然后，再次面对四神兽的考验。":"Then face the trials of the four Divine Beasts once more.","速度 0 · 羁绊 100%":"Speed 0 · Bond 100%","armor') sub=`防御":"armor') sub=`Defense","体型巨大的波克布林，一击沉重。":"A huge Bokoblin whose blows are heavy.","去解放四神兽吧，它们在等待你。":"Go free the four Divine Beasts. They await you.","林克……回生之祠中有新的力量。":"Link…… a new power awaits in the Shrine of Resurrection.","你看起来很强，一定是个冒险者吧。":"You look strong. You must be an adventurer.","如果你要上去，记得带上防寒装备。":"If you're heading up, remember to bring cold-weather gear.","克洛格森林 · 大师剑的台座在前方":"Korok Forest · The Master Sword's pedestal lies ahead","攻击 +30% · 潜行 +30%":"Attack +30% · Stealth +30%","滑翔耗力 -30% · 天空之勇者":"Paraglider stamina -30% · Hero of the Sky","飞行守护者锁定！右键举盾可盾反激光":"Guardian Skywatcher lock-on! Right-click to raise your shield and reflect the laser","希卡之石的功能，我已经解析了一部分。":"I've decoded some of the Sheikah Slate's functions.","举盾+空格 盾滑 · 瞄准+空格 后跳":"Shield+Space: Shield Surf · Aim+Space: Backflip","按 F 可以从背后偷袭未发现你的敌人。":"Press F to sneakstrike enemies that haven't spotted you.","那地方太热了，不过你是勇者应该没问题。":"It's blazing hot there, but you're a hero, so you should be fine.","守护者伤害减免 55% · 古代武器强化":"Guardian damage reduction 55% · Ancient weapon boost","DLC武器。一击必杀，但持有者生命降为1。":"A DLC weapon. One hit defeats any foe, but the wielder's health drops to 1.","旷野之息 · 程序化原型 · 全服装骑马版":"Breath of the Wild · Procedural Prototype · All Outfits, Mounted Edition","举盾+空格 可以盾滑，瞄准+空格 可以后跳。":"Shield+Space to shield surf, Aim+Space to backflip.","WASD 移动 · 空格 跳/爬/滑翔/攀爬跳":"WASD Move · Space Jump/Climb/Paraglide/Climb-jump","影之公主米多娜的头盔。戴上它，影子会变得更安静。":"The helmet of Midna, the Twilight Princess. Wear it and the shadows grow quieter.","被灾厄侵蚀、半埋在地下的守护者。眼睛仍然是弱点。":"A Guardian corrupted by the Calamity and half-buried in the ground. Its eye is still its weak point.","从沉睡中醒来时穿着的旧衣。轻便，但几乎没有防御力。":"The old clothes you wore when you woke from your slumber. Light, but they offer almost no defense.","格鲁德地区商旅的装束。轻薄的布料能反射灼热的日光。":"The garb of Gerudo merchants. Its thin fabric reflects the scorching sunlight.","H 吹哨唤马 / 上下马 · 马上 Shift 疾驰":"H Whistle for Horse / Mount · Shift Gallop while mounted","海布拉猎人的厚实羽衣。蓬松的羽领能挡住最刺骨的寒风。":"Thick feathered garb worn by Hebra hunters. The fluffy feather collar blocks the bitterest wind.","空中巡逻的古代自动兵器。螺旋桨是其标志，眼睛是弱点。":"An ancient automated weapon that patrols the sky. Its propeller is its hallmark, and its eye is its weak point.","R 瞄准 · 1-4 符文 · Q 使用 · E 交互":"R Aim · 1-4 Runes · Q Use · E Interact","乘着海风航行的勇者装束。衣料轻盈，仿佛随时会被风带走。":"A hero's garb that sails on the sea wind. So light it seems the wind could carry it away at any moment.","跨越时光的勇者装束。绿色衣摆上还沾着海拉鲁原野的草香。":"A hero's garb that spans time. Its green hem still carries the scent of Hyrule Field's grass.","漆黑如夜的装束。布料上没有任何反光，像是把光都吞了进去。":"An outfit black as night. The fabric reflects no light at all, as if it has swallowed the light whole.","希卡古代技术打造的白金装甲。齿轮与蓝色能量线在甲片间流动。":"Platinum armor forged with ancient Sheikah technology. Gears and blue energy lines flow between its plates.","忍者一族的深色装束。布料经过特殊处理，行动时几乎不会发出声响。":"The dark garb of the ninja clan. Its specially treated fabric makes almost no sound when you move.","一件印着游戏机标志的红色纪念衫。穿上它，仿佛随时可以开始新的冒险。":"A red commemorative shirt printed with a game console logo. Put it on and it feels as if a new adventure could begin at any moment.","海拉鲁全景 · 全部服装套装 · 骑马与精力 · 古代守护者 · 万物可攀":"Hyrule Panorama · Every Outfit Set · Horseback & Stamina · Ancient Guardians · Climb Anything","atk:'攻击',def:'防御',spd:'速度',stealth:'潜行',cold:'耐寒',heat:'耐热',shock:'抗电":"atk:'Attack',def:'Defense',spd:'Speed',stealth:'Stealth',cold:'Cold Resistance',heat:'Heat Resistance',shock:'Shock Resistance","水之神兽 · 瓦·露塔':'water','风之神兽 · 瓦·梅德':'wind','火之神兽 · 瓦·鲁达尼亚':'fire','雷之神兽 · 瓦·娜波力斯':'thunder":"Divine Beast Vah Ruta':'water','Divine Beast Vah Medoh':'wind','Divine Beast Vah Rudania':'fire','Divine Beast Vah Naboris':'thunder","光":"Light","圈":" wheel","无":"None","秒":"s","马":"Horse","冰冷":"Chilly","在「":"Reviving at 「","大剑":"Mighty","属性":" Element","怪物":"Monster","料理":"Food","月牙":"Crescent","材料":"Materials","海鲜":"Seafood","烹饪":"Cook","白马":"White Horse","空手":"Unarmed","耐久":"Durability","英帕":"Impa","装备":"Equip","速度":"Speed","金鬃":"Goldmane","防御":"Defense","食用":"Eat","」复活":"」","冰雪剑":"Frostblade","利特村":"Rito Village","单手剑":"One-Handed Sword","塞尔达":"Zelda","守护者":"Guardian","已拔出":"Drawn","已读档":"Save loaded","旅人盾":"Traveler's Shield","旧头巾":"Old Headband","普尔亚":"Purah","海布拉":"Hebra","盾滑！":"Shield Surf!","背 包":"POUCH","蒸发！":"Evaporated!","锅已满":"Pot is full","静止器":"Stasis","鼓隆城":"Goron City","☀ 炎热":"☀ Hot","下马 ·":"Dismount ·","传送 ·":"Warp ·","冰冷蜜瓜":"Hydromelon","卓拉大桥":"Zora Bridge","卓拉守卫":"Zora Guard","卓拉驿站":"Zora Stable","古代兵装":"Ancient Armor","古代胸甲":"Ancient Cuirass","哈特诺村":"Hateno Village","士兵头盔":"Soldier's Helm","士兵胸甲":"Soldier's Armor","奥尔汀塔":"Eldin Tower","幻影头盔":"Phantom Helmet","幻影胸甲":"Phantom Armor","怪物素材":"Monster Parts","攀岩头巾":"Climber's Bandanna","攀爬成功":"Climb complete","旅人裤子":"Traveler's Trousers","格鲁德塔":"Gerudo Tower","橡胶护腿":"Rubber Tights","汀空套装":"Tingle Set","沙漠上衣":"Desert Voe Spaulder","沙漠长裤":"Desert Voe Trousers","海利亚盾":"Hylian Shield","湖畔驿站":"Lakeside Stable","滑翔套装":"Glide Set","潜行套装":"Stealth Set","火之神兽":"Fire Divine Beast","王族之剑":"Royal Broadsword","磁力抓取":"Magnesis","精力耗尽":"Out of stamina","织梦岛裤":"Trousers of Awakening","英杰头巾":"Champion's Headband","获得了「":"Obtained 「","蛮族套装":"Barbarian Set","试炼 ·":"Trial ·","达尔克尔":"Daruk","近卫胸甲":"Royal Guard's Cuirass","酥麻水果":"Voltfruit","防火头盔":"Flamebreaker Helm","防火胸甲":"Flamebreaker Armor","雪地羽帽":"Snowquill Headdress","雷之神兽":"Thunder Divine Beast","雷光胸甲":"Thunder Armor","风之神兽":"Wind Divine Beast","骑乘 ·":"Mount ·","鬼神套装":"Fierce Deity Set","鬼神面具":"Fierce Deity Mask","黑暗套装":"Dark Set","鼓隆驿站":"Goron Stable","中央海拉鲁":"Central Hyrule","偷袭！×8":"Sneakstrike! ×8","卡卡利科村":"Kakariko Village","呀哈哈面具":"Korok Mask","已换上 ·":"Equipped ·","时之勇者帽":"Cap of Time","最后的嘱托":"A Final Plea","格鲁德头饰":"Gerudo Veil","格鲁德小镇":"Gerudo Town","橡胶紧身衣":"Rubber Armor","海利亚上衣":"Hylian Tunic","海利亚套装":"Hylian Set","海拉鲁城堡":"Hyrule Castle","烹 饪 锅":"COOKING POT","生命大萝卜":"Hearty Radish","符文冷却中":"Rune cooling down","红色鸭舌帽":"Red Cap","蜥蜴战士角":"Lizalfos Horn","试炼通过！":"Trial passed!","近卫双手剑":"Royal Guard's Claymore","风之勇者衣":"Tunic of Wind","驱魔之剑。":"The sword that seals the darkness.","你终于醒了。":"You're finally awake.","力巴尔的勇猛":"Revali's Gale","发射古代箭。":"Fires ancient arrows.","呀哈哈树叶衣":"Korok Leaf Tunic","天空之勇者帽":"Cap of the Sky","开始下雨了…":"It's started to rain…","此神兽已解放":"This Divine Beast is already freed","灾厄的化身。":"The embodiment of calamity.","白银波克布林":"Silver Bokoblin","盾牌损坏了！":"Shield broken!","红色莫力布林":"Red Moblin","蓝色大虾衬衫":"Blue Lobster Shirt","蓝色蜥蜴战士":"Blue Lizalfos","附近没有马匹":"No horses nearby","马匹受惊了！":"The horse is spooked!","黄昏之勇者裤":"Trousers of Twilight","黑色波克布林":"Black Bokoblin","（H 吹哨）":"(H to whistle)","你打开了宝箱。":"You opened the chest.","加油吧，勇者。":"Do your best, hero.","天空之勇者套装":"Hero of the Sky Set","攻击 +50%":"Attack +50%","此分类暂无物品":"No items in this category","自由探索海拉鲁":"Explore Hyrule freely","获得大师之剑！":"Master Sword obtained!","金属武器引雷！":"Metal weapons attract lightning!","一次射出3支箭。":"Fires 3 arrows at once.","卓拉族英杰武器。":"A Zora Champion's weapon.","将在初始台地复活":"You will revive on the Great Plateau","旅行者常用的弓。":"A bow often used by travelers.","潜行提升 65%":"Stealth up 65%","符文 · 静止器":"Rune · Stasis","选择食材放入锅中":"Select ingredients to put in the pot","骑士团制式盾牌。":"A standard-issue knight's shield.","km/h · 羁绊":"km/h · Bond","与老人对话了解使命":"Talk to the old man to learn your mission","你已经拥有大师之剑":"You already have the Master Sword","守护者被盾反击破！":"Guardian destroyed by a shield parry!","敏捷的蜥蜴型魔物。":"A nimble lizard-type monster.","海 拉 鲁 大 陆":"HYRULE","符文 · 磁力抓取":"Rune · Magnesis","耐寒 · 雪原行动":"Cold Resistance · Snowfield Travel","英杰之诗已在进行中":"The Champions' Ballad is already underway","顺序错误，重新开始":"Wrong order, starting over","你终于回来了，林克。":"You've finally returned, Link.","台座上的剑纹丝不动。":"The sword in the pedestal does not budge.","王族流传的华丽盾牌。":"An ornate shield passed down through the royal family.","离开台地，前往四神兽":"Leave the Plateau for the four Divine Beasts","这里有不少旅人经过。":"Many travelers pass through here.","任天堂Switch衬衫":"Nintendo Switch Shirt","古代盾 · 自动盾反！":"Ancient Shield · Auto Parry!","回生之祠 · 英杰之诗":"Shrine of Resurrection · The Champions' Ballad","对守护者伤害 +25%":"Damage to Guardians +25%","极寒灵峰锻造的魔法剑。":"A magic sword forged on the frozen peaks.","灼热难耐…需要防火装备":"Scorching heat… fireproof gear required","点击进入 · 建议全屏":"Click to enter · Fullscreen recommended","能自动盾反守护者激光。":"Automatically parries Guardian lasers.","锅盖。防御力聊胜于无。":"A pot lid. Its defense is better than nothing.","风之神兽 · 瓦·梅德":"Wind Divine Beast · Vah Medoh","一百年的等待……谢谢你。":"A hundred years of waiting…… thank you.","击败灾厄盖侬（第一阶段）":"Defeat Calamity Ganon (Phase 1)","四英杰在神兽前立下誓言。":"The four Champions swore an oath before the Divine Beasts.","海拉鲁城堡 · 灾厄盖侬":"Hyrule Castle · Calamity Ganon","神兽被夺，英杰相继倒下。":"The Divine Beasts were taken, and the Champions fell one by one.","跑来了（再按 H 上马）":" is coming (press H again to mount)","DLC · 英杰之诗 开启":"DLC · The Champions' Ballad unlocked","凝胶状魔物，会弹跳着靠近。":"A gelatinous monster that bounces toward you.","建议先去东北方的卓拉领地。":"I suggest heading northeast to Zora's Domain first.","海拉鲁的和平，从今天开始。":"Hyrule's peace begins today.","火之神兽 · 瓦·鲁达尼亚":"Fire Divine Beast · Vah Rudania","米法的祈福 · 林克复活了":"Mipha's Grace · Link revived","达尔克尔大人是我们的骄傲！":"Lord Daruk is our pride!","风之神兽还在雪山之上盘旋。":"The Wind Divine Beast still circles above the snowy peaks.","乌尔波扎的愤怒 · 范围雷电":"Urbosa's Fury · Area Lightning","呀哈哈！获得克洛格种子 ×1":"Yahaha! Got a Korok Seed ×1","拿起「必杀之剑」，通过试炼。":"Take up the 「One-Hit Obliterator」 and pass the trial.","攻击 +50% · 鬼神之力":"Attack +50% · Fierce Deity's Power","潜行 +30% · 影之公主":"Stealth +30% · Princess of Shadow","被闪电长期照射锻造的魔法剑。":"A magic sword forged by ages of lightning strikes.","雷之神兽就在西南的沙漠深处。":"The Thunder Divine Beast lies deep in the southwestern desert.","一百年前，灾厄盖侬席卷海拉鲁。":"One hundred years ago, Calamity Ganon swept across Hyrule.","先去克洛格森林取得大师之剑吧。":"First, go to Korok Forest and claim the Master Sword.","城堡上空笼罩着浓重的灾厄气息。":"A thick air of calamity hangs over the castle.","火之神兽就在死亡之山的火山口！":"The Fire Divine Beast is in the crater of Death Mountain!","力巴尔大人……他的灵魂还未安息。":"Master Revali…… his soul has not yet found rest.","水之神兽 · 瓦·露塔就在那里。":"The Water Divine Beast, Vah Ruta, is right there.","如果找到古代零件，记得带回来给我。":"If you find ancient parts, remember to bring them back to me.","村庄周围能看到守护者的巡逻，小心。":"Guardians patrol around the village. Be careful.","灾厄盖侬已消灭 · 海拉鲁重归和平":"Calamity Ganon defeated · Hyrule at peace again","希卡之石的试炼。完成谜题以通过试炼。":"A trial of the Sheikah Slate. Solve the puzzle to pass.","伪装成岩石的巨大魔物。弱点在背部矿石。":"A huge monster disguised as a rock. Its weak point is the ore on its back.","树木、塔、建筑、岩石——万物皆可攀爬。":"Trees, towers, buildings, rocks—everything can be climbed.","你是……男性？这里是女性城镇，请勿入内。":"You're…… a man? This is a town of women. Please do not enter.","左键 连击（长按旋转斩） · 右键 举盾":"LMB Combo (hold for Spin Attack) · RMB Raise Shield","塞尔达公主在林克面前第一次露出脆弱的表情。":"The first time Princess Zelda showed her vulnerable side before Link.","游泳速度 +40% · 游泳耗力 -30%":"Swim Speed +40% · Swim Stamina -30%","COOKING POT · 最多 5 种食材":"COOKING POT · Up to 5 Ingredients","四神兽已全部解放！去克洛格森林寻找大师之剑吧":"All four Divine Beasts are freed! Head to Korok Forest to find the Master Sword","四英杰战死，塞尔达公主独自在城堡中牵制着盖侬。":"The four Champions fell in battle, and Princess Zelda alone held Ganon at bay in the castle.","来自天空之岛的勇者装束。衣摆上绣着云与鸟的纹样。":"A hero's garb from the island in the sky. Clouds and birds are embroidered on its hem.","以橡胶与绝缘布缝制的奇装。雷电会顺着衣料导入地面。":"Strange garb sewn from rubber and insulating cloth. Lightning runs down the fabric into the ground.","格鲁德族世代相传的宝盔。戴上它，天雷也会绕道而行。":"A treasured helm passed down through the Gerudo for generations. Wear it, and even lightning will pass you by.","王族近卫的礼装。深蓝与金线交织，披风在风中猎猎作响。":"Ceremonial garb of the Royal Guard. Deep blue woven with gold thread, its cape snapping in the wind.","V 图鉴 · G 英杰 · F5 存档 · F9 读档":"V Compendium · G Champions · F5 Save · F9 Load","守护者锁定！右键举盾，在激光命中瞬间盾反 3 次可击破":"Guardian lock-on! Raise your shield with RMB and parry 3 times as the laser hits to destroy it","卓拉族以鱼鳞打造的礼装。入水时，衣甲会顺着水流贴合身体。":"Ceremonial Zora garb made from fish scales. In water, it clings to your body with the current.","Tab 换盾 · F 偷袭 · Shift 冲刺（耗精力）":"Tab Switch Shield · F Sneakstrike · Shift Sprint (uses stamina)","海拉鲁旅人最常见的装束。绿色外衣与结实的皮靴，适合长途跋涉。":"The most common garb of Hyrule's travelers. A green tunic and sturdy leather boots, made for long treks.","攀岩者钟爱的轻装。指尖与鞋底都经过防滑处理，岩壁不再遥不可及。":"Light gear beloved by climbers. Fingertips and soles are treated for grip, so no rock face is out of reach.","散发着紫黑雾气的幻影盔甲。穿上它的人会听见来自另一个世界的低语。":"Phantom armor that gives off a purple-black haze. Those who wear it hear whispers from another world.","用树叶与藤蔓编成的装束。戴上叶子面具，森林里的呀哈哈似乎不再躲藏。":"An outfit woven from leaves and vines. With the leaf mask on, the Koroks of the forest seem to stop hiding.","一位自称妖精商人的男人留下的绿色紧身衣。穿上它总觉得有人在叫你“汀空”。":"Green tights left behind by a man who called himself a fairy merchant. Wearing them, you always feel someone is calling you “Tingle”.","冰":"Ice","弓":"Bows","桥":"Bridge","空":"Empty","(防":"(Def ","回复":"Recover","坚硬":"Tough","宝箱":"Treasure Chest","山灵":"Mountain Spirit","抗电":"Shock Resistance","旅人":"Traveler","服装":"Clothing","村民":"Villager","清空":"Clear","生命":"Hearty","盾牌":"Shields","米法":"Mipha","耐寒":"Cold Resistance","苹果":"Apple","解放":"Free the","速速":"Hasty","锅盖":"Pot Lid","青岚":"Azure Mist","骑乘":"Ride","兽王盾":"Savage Lynel Shield","出现！":"Appears!","制冰器":"Cryonis","双手剑":"Two-Handed","士兵盾":"Soldier's Shield","将在「":"You will revive at 「","已装备":"Equipped","拉聂尔":"Lanayru","旅人马":"Wanderer","旧衣服":"Old Clothes","格鲁德":"Gerudo","火焰剑":"Flameblade","盾牌：":"Shield: ","英杰服":"Champion's Tunic","融化！":"Melted!","阿卡莱":"Akkala","食用「":"You ate 「","鼓隆族":"Goron","⚡ 雷雨":"⚡ Thunderstorm","乌尔波扎":"Urbosa","光鳞之枪":"Lightscale Trident","初始台地":"Great Plateau","卓拉头冠":"Zora Helm","卓拉护腿":"Zora Greaves","卓拉鳞甲":"Zora Armor","古代头盔":"Ancient Helm","古代齿轮":"Ancient Gear","回生之祠":"Shrine of Resurrection","士兵护腿":"Soldier's Greaves","大剑香蕉":"Mighty Bananas","存档损坏":"Save data corrupted","幻影套装":"Phantom Set","当前任务":"Current Quest","拉聂尔塔":"Lanayru Tower","攀岩套装":"Climbing Set","旅人上衣":"Traveler's Tunic","旋转斩！":"Spin Attack!","橡胶头盔":"Rubber Helm","水之神兽":"Water Divine Beast","汀空裤子":"Tingle's Tights","沙漠头巾":"Desert Voe Headband","没有存档":"No save data","海布拉塔":"Hebra Tower","滑翔上衣":"Glide Shirt","滑翔裤子":"Glide Trousers","潜行裤子":"Stealth Tights","火咒盖侬":"Fireblight Ganon","白银丘丘":"Silver Chuchu","神秘老人":"Mysterious Old Man","织梦岛帽":"Koholint Cap","绿色丘丘":"Green Chuchu","英杰裤子":"Champion's Trousers","蓝色丘丘":"Blue Chuchu","蛮族护腿":"Barbarian Leg Wraps","试炼之祠":"Shrine of Trials","近卫头盔":"Royal Guard Cap","速速蘑菇":"Rushroom","铠甲南瓜":"Fortified Pumpkin","防火套装":"Flamebreaker Set","阿卡莱塔":"Akkala Tower","雪地羽衣":"Snowquill Tunic","雷光头盔":"Thunder Helm","雷咒盖侬":"Thunderblight Ganon","风咒盖侬":"Windblight Ganon","骑士之剑":"Knight's Broadsword","鬼神护腿":"Fierce Deity Boots","黑暗上衣":"Dark Tunic","黑暗裤子":"Dark Trousers","🔥 灼热":"🔥 Scorching","/4 神兽":"/4 Divine Beasts","从台座拔剑":"Pull the Sword from the Pedestal","克洛格种子":"Korok Seed","呀哈哈套装":"Korok Set","哈特诺驿站":"Hateno Stable","心之容器：":"Heart Containers: ","时之勇者衣":"Hero of Time Tunic","格鲁德上衣":"Gerudo Top","格鲁德套装":"Gerudo Set","格鲁德裙裤":"Gerudo Sirwal","汀空紧身衣":"Tingle's Shirt","海利亚兜帽":"Hylian Hood","海利亚裤子":"Hylian Trousers","灾厄已消散":"The Calamity has lifted","烹饪成功！":"Cooking complete!","盾反成功！":"Perfect Guard!","米多娜头盔":"Midna's Helmet","织梦岛套装":"Koholint Set","解放四神兽":"Free the Four Divine Beasts","费罗尼大桥":"Faron Bridge","雾气弥漫…":"Fog rolls in…","风之勇者裤":"Hero of Winds Trousers","魔吉拉面具":"Majora's Mask","切换盾牌 ·":"Switch Shield ·","加巴希夫神庙":"Gabashif Shrine","古代兵装·弓":"Ancient Bow","图米恩科神庙":"Tumienko Shrine","天空之勇者衣":"Hero of the Sky Tunic","拔出大师之剑":"Draw the Master Sword","武器损坏了！":"Your weapon broke!","点击画面关闭":"Click to close","白银莫力布林":"Silver Moblin","简单的木盾。":"A simple wooden shield.","红色蜥蜴战士":"Red Lizalfos","蓝色波克布林":"Blue Bokoblin","讨伐灾厄盖侬":"Defeat Calamity Ganon","额外黄心 +":"Extra Yellow Hearts +","黄昏之勇者帽":"Hero of Twilight Cap","黄金波克布林":"Gold Bokoblin","黑色莫力布林":"Black Moblin","乌尔波扎的愤怒":"Urbosa's Fury","你握住了剑柄。":"You take hold of the hilt.","均衡的旅行装束":"Balanced Traveler's Outfit","希 卡 之 石":"Sheikah Slate","旷 野 之 息":"Breath of the Wild","磁力 · 抓取":"Magnesis · Grab","英杰之诗 阶段":"Champions' Ballad Phase ","达尔克尔的守护":"Daruk's Protection","骑士团制式弓。":"A standard-issue bow of the Knights of Hyrule.","传送点已注册 ·":"Travel Point registered ·","去拯救塞尔达吧。":"Go save Zelda.","尚未获得英杰技能":"No Champion ability acquired yet","更容易发现克洛格":"Makes Koroks easier to find","点击格子全部点亮":"Click the tiles to light them all","获得英杰技能 ·":"Champion Ability Acquired ·","静止器 · 锁定":"Stasis · Lock-On","……谢谢你，林克。":"……Thank you, Link.","从台座拔出大师之剑":"Draw the Master Sword from the Pedestal","你当前的心之容器为":"You currently have","抗电 · 雷雨行动":"Shock Resistance · Thunderstorm Action","最终决战已在进行中":"The final battle is already underway","滑翔耗力 -55%":"Glide Stamina -55%","符文 · 遥控炸弹":"Rune · Remote Bomb","耐火 · 火山行动":"Fireproof · Volcano Action","莱尼尔的巨大骨剑。":"A giant bone sword wielded by a Lynel.","驱魔之剑承认了你。":"The sword that seals the darkness has acknowledged you.","制冰器 · 生成冰柱":"Cryonis · Create Ice Pillar","攻击极高，耐久极低。":"Extremely high attack, extremely low durability.","磁力 · 无金属目标":"Magnesis · No Metal Target","英帕大人一直在等你。":"Lady Impa has been waiting for you.","骑士团配发的单手剑。":"A one-handed sword issued to the knights.","你还没解放任何神兽……":"You have not freed any Divine Beasts yet……","哈特诺是个安静的村子。":"Hateno is a quiet village.","完全免疫雷电 · 抗电":"Complete Lightning Immunity · Shock Resistance","旅行者常用的轻便木盾。":"A lightweight wooden shield commonly used by travelers.","林克……你终于回来了。":"Link…… you have finally returned.","灾厄盖侬 · 最终决战":"Calamity Ganon · Final Battle","烈日灼人…需要耐热装备":"The sun is scorching… heat-resistant gear required","莱尼尔首领的强力盾牌。":"A powerful shield of the Lynel chieftain.","防御提升 · 金属护甲":"Defense Up · Metal Armor","任务更新 · 解放四神兽":"Quest Updated · Free the Four Divine Beasts","击败魔兽盖侬（第二阶段）":"Defeat Dark Beast Ganon (Phase 2)","回 忆 · MEMORY":"Memory · MEMORY","海拉鲁士兵的制式单手剑。":"A standard-issue one-handed sword of Hyrulean soldiers.","耐热 · 游泳 +10%":"Heat Resistance · Swim +10%","达尔克尔的守护 · 弹反":"Daruk's Protection · Perfect Guard","text='前往克洛格森林":"text='Head to Korok Forest","力巴尔的勇猛 · 上升气流":"Revali's Gale · Updraft","按 Tab 可以切换盾牌。":"Press Tab to switch shields.","海拉鲁的风，今天也很喧嚣。":"The wind of Hyrule is restless today as well.","神兽内部弥漫着灾厄的气息。":"The Divine Beast's interior is thick with the Calamity's presence.","记住闪烁顺序后点击下方符号":"Memorize the flashing order, then tap the symbols below","雷之神兽 · 瓦·娜波力斯":"Divine Beast Vah Naboris","你可以在背包里查看你的装备。":"You can check your equipment in the pouch.","回忆之力 · 心之容器 +1":"Power of Memory · Heart Container +1","攻击 +10% · 时之勇者":"Attack +10% · Hero of Time","游泳 +20% · 风之勇者":"Swim +20% · Hero of Winds","潜行 +50% · 诡异气息":"Stealth +50% · Ominous Aura","达尔克尔的守护 · 自动弹反":"Daruk's Protection · Auto Perfect Guard","一百年的沉睡，海拉鲁已经变了。":"After a hundred years of slumber, Hyrule has changed.","半人马型强大魔物。弱点在头部。":"A powerful centaur-like monster. Its weak point is its head.","攻击 +15% · 黄昏之勇者":"Attack +15% · Hero of Twilight","/* ★ 任务目标 HUD */":"/* ★ Quest Objective HUD */","图 鉴 · COMPENDIUM":"Compendium · COMPENDIUM","沿着河往上游走，找卓拉族问问路。":"Follow the river upstream and ask the Zora for directions.","如果食物不够，前面有驿站可以休息。":"If you do not have enough food, there is a stable ahead where you can rest.","水之神兽就在北边，但被灾厄占据了。":"The Divine Beast of Water is to the north, but the Calamity has claimed it.","这里是初始台地，你是被选中的勇者。":"This is the Great Plateau. You are the chosen hero.","守护者停止运转 · 获得古代齿轮 ×":"Guardian deactivated · Obtained Ancient Gear ×","记住，塞尔达一直在城堡里牵制着盖侬。":"Remember, Zelda has been holding Ganon back in the castle.","如果你收集到克洛格种子，可以来找我玩。":"If you collect Korok Seeds, come play with me.","没有大师之剑，你无法真正伤害灾厄盖侬。":"Without the Master Sword, you cannot truly harm Calamity Ganon.","去解放四神兽，拔出大师之剑，然后去见她。":"Free the four Divine Beasts, draw the Master Sword, then go see her.","需要至少 13 颗心之容器才能拔出此剑。":"You need at least 13 Heart Containers to draw this sword.","攀爬速度 +35% · 攀爬耗力 -30%":"Climb Speed +35% · Climbing Stamina -30%","马厩旁的马可以骑，靠近后按 E 就能上马。":"You can ride the horses by the stable. Get close and press E to mount.","v7 · 精力 / 服装 / 骑马 / 环境":"v7 · Stamina / Clothing / Horseback / Environment","灾厄盖侬倒下…但灾厄并未消散。魔兽盖侬降临！":"Calamity Ganon falls… but the Calamity is not gone. Dark Beast Ganon descends!","为滑翔者设计的红色装束。兜帽边缘收窄，风阻极小。":"A red outfit designed for gliders. The hood is tapered for minimal wind resistance.","海拉鲁士兵的制式盔甲。厚重，但能抵挡大部分刀剑。":"Standard armor of Hyrulean soldiers. Heavy, but it can withstand most blades.","M 地图 · I 背包（服装页换装） · C 烹饪":"M Map · I Pouch (change outfits on the clothing page) · C Cooking","古老蛮族的兽骨装束。放弃防御，换来压倒性的攻击力。":"The bone armor of an ancient barbarian tribe. It forgoes defense for overwhelming attack power.","（Shift 疾驰 / 空格 跳跃 / E 下马）":"(Shift Sprint / Space Jump / E Dismount)","来自一座会做梦的小岛的装束。颜色鲜艳得像是童话绘本。":"An outfit from an island that dreams. Its colors are as vivid as a picture book.","程序化 WebGL 原型 · 完整服装 · 骑马探索":"Procedural WebGL prototype · Full armor sets · Horseback exploration","一张散发着不祥气息的彩色面具。戴久了，会听见面具在笑。":"A colorful mask that radiates an ominous aura. Wear it too long and you will hear it laughing.","格鲁德小镇的传统服饰。金饰与薄纱在沙漠的风中轻轻摇晃。":"Traditional clothing of Gerudo Town. Gold ornaments and gauze sway gently in the desert wind.","印着巨大蓝色龙虾的度假衬衫。海风、沙滩与冰镇果汁的味道。":"A vacation shirt printed with a giant blue lobster. It smells of sea breeze, sandy beaches, and iced juice.","塞尔达公主为英杰林克缝制的蓝色上衣。衣摆绣着四神兽的纹章。":"The blue tunic Princess Zelda sewed for the Champion Link. The four Divine Beasts' crests are embroidered on its hem.","鼓隆族打造的耐火石甲。即便走进熔岩旁的灼热地带也能安然无恙。":"Fireproof stone armor forged by the Gorons. Even the scorching land beside lava cannot harm you.","点击青色传送点传送 · 灰色尚未激活 · M / ESC 关闭":"Click a cyan travel point to warp · Gray points are not yet active · M / ESC to close","来自黄昏世界的勇者装束。布料上残留着 twilight 的微光。":"A hero's outfit from the Twilight world. A faint twilight glow lingers in the fabric.","传说中鬼神所穿的战甲。白色的甲片与红色纹路，仿佛仍残留着神明的怒火。":"The armor worn by the legendary Fierce Deity. Its white plates and red patterns seem to hold the god's lingering wrath.","古代希卡技术制造的自动兵器。会锁定目标发射古代激光；盾反 3 次可击破。":"An automated weapon built with ancient Sheikah technology. It locks onto targets and fires ancient lasers; three perfect guards will destroy it.","全部服装已解锁 · I 背包服装页换装 · 靠近马按 E 骑乘 · H 吹哨唤马":"All clothing unlocked · Change outfits on the I Pouch clothing page · Press E near a horse to ride · Press H to whistle for your horse"},"ja":{"与":"と","分":"分","心":"ハート","火":"炎","雷":"雷","关闭":"閉じる","回忆":"思い出","夜影":"ナイトシェード","对话":"会話","帕雅":"パーヤ","攻击":"攻撃","暖暖":"ポカポカ","木盾":"木の盾","栗风":"クリカゼ","潜行":"ステルス","白雪":"シラユキ","离开":"出る","精力":"スタミナ","耐热":"暑さ耐性","草帽":"麦わら帽子","赤焰":"クリムゾン","酥麻":"ビリビリ","长枪":"槍","颗。":"個。","魔物":"魔物","兽神弓":"獣神の弓","利特族":"リト族","力巴尔":"リーバル","哈特尔":"ネクルダ","奥尔汀":"オルディン","已存档":"セーブしました","已解放":"解放済み","旅人剑":"旅人の剣","旧上衣":"古びた服","旧裤子":"古びたズボン","汀空帽":"チンクルの帽子","王族盾":"王族の盾","精 力":"スタミナ","莱尼尔":"ライネル","费罗尼":"フィローネ","雷电剑":"雷電の剣","骑士盾":"騎士の盾","· 耐久":"· 耐久値","❄ 寒冷":"❄ 寒さ","休闲短裤":"カジュアルショーツ","兽神大剑":"獣神の大剣","利特驿站":"リトの馬宿","卓拉套装":"ゾーラセット","卓拉领地":"ゾーラの里","双子驿站":"双子山の馬宿","古代护腿":"古代兵装のすね当て","吹哨 ·":"口笛 ·","士兵之剑":"兵士の剣","士兵盔甲":"兵士セット","大师之剑":"マスターソード","岩石巨人":"イワロック","幻影护腿":"幻影のすね当て","必杀之剑":"一撃の剣","攀岩上衣":"クライミングギア","攀岩裤子":"クライミングブーツ","旅人之弓":"旅人の弓","暖暖草果":"ポカポカ草の実","橡胶套装":"ゴムセット","水咒盖侬":"水のカースガノン","沙滩短裤":"ビーチショーツ","沙漠套装":"砂漠のボーイセット","没有盾牌":"盾がありません","湖之大桥":"湖の大橋","滑翔兜帽":"滑空フード","潜行上衣":"忍びの服","潜行面罩":"忍びの面","灾厄盖侬":"厄災ガノン","百年等待":"百年の待機","精力 +":"スタミナ +","织梦岛衣":"夢をみる島の服","英杰上衣":"英傑の服","莱尼尔角":"ライネルの角","蛮族头骨":"蛮族の兜","蛮族胸甲":"蛮族の鎧","费罗尼塔":"フィローネの塔","近卫护腿":"近衛のブーツ","遥控炸弹":"リモコンバクダン","防御 5":"防御 5","防火护腿":"防火のすね当て","雪地套装":"雪羽セット","雪地羽裤":"雪羽のズボン","雷光护腿":"雷光のすね当て","静谧公主":"静かな姫","马匹精力":"馬のスタミナ","骑士之弓":"騎士の弓","鬼神胸甲":"鬼神の鎧","黑暗头巾":"ダークフード","黑色丘丘":"黒チュチュ","· 骑乘中":"· 騎乗中","你倒下了…":"倒れてしまった…","初始台地塔":"始まりの台地の塔","呀哈哈藤裤":"コログのツタズボン","失去的战友":"失われた戦友","无特殊效果":"特殊効果なし","时之勇者裤":"時の勇者のズボン","格鲁德大桥":"ゲルド大橋","格鲁德守卫":"ゲルドの衛兵","格鲁德驿站":"ゲルドの馬宿","波克布林角":"ボコブリンの角","海利亚大桥":"ハイリア大橋","海布拉大桥":"ヘブラ大橋","灾难的预兆":"厄災の予兆","玛奥努神庙":"マオヌの祠","离马匹太远":"馬から離れすぎている","米法的祈福":"ミファーの祈り","英杰的誓言":"英傑の誓い","试炼通过证":"試練の証","近卫兵套装":"近衛セット","风之勇者帽":"風の勇者の帽子","飞行守护者":"飛行型ガーディアン","中央海拉鲁塔":"中央ハイラルの塔","前往卓拉领地":"ゾーラの里へ","卡卡利科驿站":"カカリコの馬宿","古代兵装·盾":"古代兵装の盾","塞尔达的呼唤":"ゼルダの呼び声","天空之勇者裤":"天空の勇者のズボン","时之勇者套装":"時の勇者セット","海拉鲁的和平":"ハイラルの平和","瓦摩达伊神庙":"ワモダイの祠","白银蜥蜴战士":"白銀リザルフォス","红色波克布林":"赤ボコブリン","腐朽的守护者":"朽ちたガーディアン","蓝色莫力布林":"青モリブリン","选择一件物品":"アイテムを選択","风之勇者套装":"風の勇者セット","黄昏之勇者衣":"黄昏の勇者の服","黄金蜥蜴战士":"黄金リザルフォス","黑色蜥蜴战士":"黒リザルフォス","你 倒 下 了":"力尽きた","前往克洛格森林":"コログの森へ","大师之剑的台座":"マスターソードの台座","攻击 +20%":"攻撃 +20%","最常见的魔物。":"最もよく見かける魔物。","磁力 · 释放":"マグネシス · 解除","英杰技能冷却中":"英傑の技はクールダウン中","进入海拉鲁城堡":"ハイラル城へ","黄昏之勇者套装":"黄昏の勇者セット","Switch衬衫":"スイッチシャツ","先解放四神兽吧。":"まずは四神獣を解放しよう。","完成四座神庙试炼":"四つの祠の試練をクリア","尚未遇到任何魔物":"まだ魔物と出会っていない","正面攻击无法偷袭":"正面からの攻撃では不意打ちできない","符文 · 制冰器":"ルーン · ビトタケシ","该传送点尚未激活":"このワープポイントはまだ起動していない","马匹不肯进入深水":"馬は深い水に入りたがらない","E / 点击 继续":"E / クリックで続行","」已经托付给你了。":"」を託された。","传说中的最强盾牌。":"伝説の最強の盾。","士兵配发的金属盾。":"兵士に支給される金属の盾。","收集13颗心之容器":"ハートの器を13個集める","橡胶套装绝缘了雷电":"ゴムセットが雷を絶縁した","熔岩锻造的魔法剑。":"溶岩で鍛えられた魔法の剣。","精力耗尽，无法冲刺":"スタミナ切れでダッシュできない","耐热 · 沙漠行动":"暑さ耐性 · 砂漠行動","雷光头盔引开了雷电":"雷鳴の兜が雷を逸らした","口哨声传不到那么远（":"口笛の音はそこまで届かない（","旅行者常用的单手剑。":"旅人がよく使う片手剣。","神秘的力量尚未苏醒。":"神秘の力はまだ目覚めていない。","这是你的使命，林克。":"これが君の使命だ、リンク。","克洛格森林 · 大师剑":"コログの森 · マスターソード","四咒盖侬之一就在前方。":"四体のカースガノンのうち、一体がこの先にいる。","寒意刺骨…需要防寒装备":"身を切る寒さ…防寒装備が必要だ","无特殊效果 · 纪念装":"特殊効果なし · 記念服","水之神兽 · 瓦·露塔":"水の神獣 · ヴァ·ルッタ","点击 / 按 E 复活":"クリック / Eで復活","王族流传的华丽单手剑。":"王家に伝わる華麗な片手剣。","这里没有马匹落脚的地方":"ここに馬を置ける場所はない","静止器 · 未发现目标":"ビタロック · 対象が見つからない","……你身上的衣服真特别。":"……その服、ずいぶん変わっているね。","击败它，解放英杰的灵魂。":"倒して、英傑の魂を解放せよ。","制冰器 · 需在水边使用":"ビトタケシ · 水辺で使う必要がある","欢迎来到卓拉领地，林克。":"ゾーラの里へようこそ、リンク。","灾厄盖侬分身的四咒之一。":"厄災ガノンの分身である四体のカースガノンのうちの一体。","耐热 · 潜行 +20%":"暑さ耐性 · ステルス +20%","（看来你需要特殊通行证）":"（特別な通行証が必要なようだ）","「林克，你一定要活下去。」":"「リンク、必ず生きて。」","听说东边的山顶有个研究所。":"東の山の頂上に研究所があるらしい。","攻击 +10% · 梦之岛":"攻撃 +10% · 夢の島","火 / 雷之神兽 · 剩余":"火 / 雷の神獣 · 残り","米法大人……她一直在等你。":"ミファー様……ずっとあなたを待っています。","试炼通过 · 获得心之容器":"試練クリア · ハートの器を入手","雷雨来了…金属装备会引雷！":"雷雨だ…金属装備は雷を引き寄せる！","「大师之剑」已加入你的装备。":"「マスターソード」を装備に加えた。","听说北边的雪山上住着莱尼尔。":"北の雪山にはライネルが住んでいるらしい。","塞尔达独自在城堡中牵制盖侬。":"ゼルダは一人で城に残り、ガノンを引きつけている。","攻击 +10% · 王族威严":"攻撃 +10% · 王族の威厳","潜行 +20% · 奇装异服":"ステルス +20% · 奇抜な装い","然后，再次面对四神兽的考验。":"そして、再び四神獣の試練に挑む。","速度 0 · 羁绊 100%":"速度 0 · 絆 100%","armor') sub=`防御":"armor') sub=`防御","体型巨大的波克布林，一击沉重。":"体の大きなボコブリン。一撃が重い。","去解放四神兽吧，它们在等待你。":"四神獣を解放しに行こう。彼らが待っている。","林克……回生之祠中有新的力量。":"リンク……回生の祠に新しい力がある。","你看起来很强，一定是个冒险者吧。":"強そうだね、きっと冒険者だろう。","如果你要上去，记得带上防寒装备。":"上へ行くなら、防寒装備を忘れずに。","克洛格森林 · 大师剑的台座在前方":"コログの森 · マスターソードの台座はこの先","攻击 +30% · 潜行 +30%":"攻撃 +30% · ステルス +30%","滑翔耗力 -30% · 天空之勇者":"滑空消費スタミナ -30% · 天空の勇者","飞行守护者锁定！右键举盾可盾反激光":"飛行型ガーディアンにロックオン！右クリックで盾を構え、レーザーを盾で返せる","希卡之石的功能，我已经解析了一部分。":"シーカーの石の機能を、私は一部解析した。","举盾+空格 盾滑 · 瞄准+空格 后跳":"盾+スペース 盾サーフィン · エイム+スペース 後方跳び","按 F 可以从背后偷袭未发现你的敌人。":"Fで、こちらに気づいていない敵を背後から不意打ちできる。","那地方太热了，不过你是勇者应该没问题。":"あそこはとても熱いが、勇者なら大丈夫だろう。","守护者伤害减免 55% · 古代武器强化":"ガーディアンからのダメージ軽減 55% · 古代兵器強化","DLC武器。一击必杀，但持有者生命降为1。":"DLC武器。一撃必殺だが、持ち主の体力は1になる。","旷野之息 · 程序化原型 · 全服装骑马版":"ブレス オブ ザ ワイルド · プロシージャルプロトタイプ · 全衣装騎乗版","举盾+空格 可以盾滑，瞄准+空格 可以后跳。":"盾+スペースで盾サーフィン、エイム+スペースで後方跳びができる。","WASD 移动 · 空格 跳/爬/滑翔/攀爬跳":"WASD 移動 · スペース ジャンプ/登り/滑空/登りジャンプ","影之公主米多娜的头盔。戴上它，影子会变得更安静。":"影の姫ミドナの兜。かぶれば影が静かになる。","被灾厄侵蚀、半埋在地下的守护者。眼睛仍然是弱点。":"厄災に侵され、半ば地中に埋もれたガーディアン。目が弱点なのは変わらない。","从沉睡中醒来时穿着的旧衣。轻便，但几乎没有防御力。":"眠りから覚めたときに着ていた古い服。軽いが、防御力はほとんどない。","格鲁德地区商旅的装束。轻薄的布料能反射灼热的日光。":"ゲルド地方の商人の装束。薄い布が灼熱の日差しを反射する。","H 吹哨唤马 / 上下马 · 马上 Shift 疾驰":"H 口笛で馬を呼ぶ / 乗り降り · 騎乗中 Shift で疾走","海布拉猎人的厚实羽衣。蓬松的羽领能挡住最刺骨的寒风。":"ヘブラの狩人の厚い羽衣。ふわふわの羽の襟が最も厳しい寒風を防ぐ。","空中巡逻的古代自动兵器。螺旋桨是其标志，眼睛是弱点。":"空中を巡回する古代の自動兵器。プロペラが特徴で、目が弱点。","R 瞄准 · 1-4 符文 · Q 使用 · E 交互":"R エイム · 1-4 ルーン · Q 使用 · E 調べる","乘着海风航行的勇者装束。衣料轻盈，仿佛随时会被风带走。":"海風に乗る勇者の装束。軽やかな生地で、いつ風にさらわれてもおかしくない。","跨越时光的勇者装束。绿色衣摆上还沾着海拉鲁原野的草香。":"時を越えた勇者の装束。緑の裾にはハイラル平原の草の香りが残る。","漆黑如夜的装束。布料上没有任何反光，像是把光都吞了进去。":"夜のように真っ黒な装束。布は一切光を反射せず、光を飲み込んだようだ。","希卡古代技术打造的白金装甲。齿轮与蓝色能量线在甲片间流动。":"シーカーの古代技術で作られた白金の鎧。歯車と青いエネルギー線が甲板の間を流れる。","忍者一族的深色装束。布料经过特殊处理，行动时几乎不会发出声响。":"忍びの一族の暗い装束。特殊加工された布は、動いてもほとんど音を立てない。","一件印着游戏机标志的红色纪念衫。穿上它，仿佛随时可以开始新的冒险。":"ゲーム機のロゴが入った赤い記念シャツ。着ると、いつでも新しい冒険を始められる気がする。","海拉鲁全景 · 全部服装套装 · 骑马与精力 · 古代守护者 · 万物可攀":"ハイラル全景 · 全衣装セット · 騎乗とスタミナ · 古代ガーディアン · 万物登攀","atk:'攻击',def:'防御',spd:'速度',stealth:'潜行',cold:'耐寒',heat:'耐热',shock:'抗电":"atk:'攻撃',def:'防御',spd:'速度',stealth:'ステルス',cold:'寒さ耐性',heat:'暑さ耐性',shock:'雷耐性","水之神兽 · 瓦·露塔':'water','风之神兽 · 瓦·梅德':'wind','火之神兽 · 瓦·鲁达尼亚':'fire','雷之神兽 · 瓦·娜波力斯':'thunder":"水の神獣 · ヴァ·ルッタ':'water','風の神獣 · ヴァ·メドー':'wind','火の神獣 · ヴァ·ルーダニア':'fire','雷の神獣 · ヴァ·ナボリス':'thunder","光":"光","圈":"周","无":"なし","秒":"秒","马":"馬","冰冷":"冷気の","在「":"「","大剑":"力の","属性":"属性","怪物":"魔物","料理":"料理","月牙":"ミカヅキ","材料":"素材","海鲜":"海鮮の","烹饪":"料理する","白马":"白馬","空手":"素手","耐久":"耐久値","英帕":"インパ","装备":"装備","速度":"速度","金鬃":"キンバネ","防御":"防御","食用":"食べる","」复活":"」で復活","冰雪剑":"氷雪剣","利特村":"リトの村","单手剑":"片手剣","塞尔达":"ゼルダ","守护者":"ガーディアン","已拔出":"抜刀済み","已读档":"ロード完了","旅人盾":"旅人の盾","旧头巾":"古い頭巾","普尔亚":"プルア","海布拉":"ヘブラ","盾滑！":"シールドサーフ！","背 包":"ポーチ","蒸发！":"蒸発！","锅已满":"鍋がいっぱい","静止器":"ビタロック","鼓隆城":"ゴロンシティ","☀ 炎热":"☀ 暑い","下马 ·":"下馬 ·","传送 ·":"ワープ ·","冰冷蜜瓜":"ヒンヤリメロン","卓拉大桥":"ゾーラ大橋","卓拉守卫":"ゾーラの衛兵","卓拉驿站":"ゾーラ馬宿","古代兵装":"古代兵装","古代胸甲":"古代兵装の胸甲","哈特诺村":"ハテノ村","士兵头盔":"兵士の兜","士兵胸甲":"兵士の鎧","奥尔汀塔":"オルディンの塔","幻影头盔":"幻影の兜","幻影胸甲":"幻影の鎧","怪物素材":"魔物素材","攀岩头巾":"登攀者のバンダナ","攀爬成功":"登頂成功","旅人裤子":"旅人のズボン","格鲁德塔":"ゲルドの塔","橡胶护腿":"ゴムのタイツ","汀空套装":"チンクル装束","沙漠上衣":"砂漠の上衣","沙漠长裤":"砂漠のズボン","海利亚盾":"ハイリアの盾","湖畔驿站":"湖畔の馬宿","滑翔套装":"滑空装束","潜行套装":"忍び装束","火之神兽":"火の神獣","王族之剑":"王族の剣","磁力抓取":"マグネシス","精力耗尽":"スタミナ切れ","织梦岛裤":"夢をみる島のズボン","英杰头巾":"英傑の頭巾","获得了「":"「","蛮族套装":"蛮族装束","试炼 ·":"試練 ·","达尔克尔":"ダルーク","近卫胸甲":"近衛兵の胸甲","酥麻水果":"ビリビリフルーツ","防火头盔":"防火の兜","防火胸甲":"防火の鎧","雪地羽帽":"雪原の羽帽子","雷之神兽":"雷の神獣","雷光胸甲":"雷光の鎧","风之神兽":"風の神獣","骑乘 ·":"騎乗 ·","鬼神套装":"鬼神装束","鬼神面具":"鬼神の仮面","黑暗套装":"闇装束","鼓隆驿站":"ゴロン馬宿","中央海拉鲁":"中央ハイラル","偷袭！×8":"不意打ち！×8","卡卡利科村":"カカリコ村","呀哈哈面具":"コログのお面","已换上 ·":"装備 ·","时之勇者帽":"時の勇者の帽子","最后的嘱托":"最後の願い","格鲁德头饰":"ゲルドのベール","格鲁德小镇":"ゲルドの街","橡胶紧身衣":"ゴムの服","海利亚上衣":"ハイリアの服","海利亚套装":"ハイリア装束","海拉鲁城堡":"ハイラル城","烹 饪 锅":"料理鍋","生命大萝卜":"マックスラディッシュ","符文冷却中":"ルーン冷却中","红色鸭舌帽":"赤いキャップ","蜥蜴战士角":"リザルフォスの角","试炼通过！":"試練クリア！","近卫双手剑":"近衛兵の大剣","风之勇者衣":"風の勇者の服","驱魔之剑。":"魔を払う剣。","你终于醒了。":"やっと目が覚めたのね。","力巴尔的勇猛":"リーバルの猛り","发射古代箭。":"古代の矢を放つ。","呀哈哈树叶衣":"コログの葉の服","天空之勇者帽":"天空の勇者の帽子","开始下雨了…":"雨が降り出した…","此神兽已解放":"この神獣はすでに解放されている","灾厄的化身。":"厄災の化身。","白银波克布林":"白銀ボコブリン","盾牌损坏了！":"盾が壊れた！","红色莫力布林":"赤モリブリン","蓝色大虾衬衫":"青いロブスターシャツ","蓝色蜥蜴战士":"青リザルフォス","附近没有马匹":"近くに馬がいない","马匹受惊了！":"馬が驚いた！","黄昏之勇者裤":"黄昏の勇者のズボン","黑色波克布林":"黒ボコブリン","（H 吹哨）":"（H で口笛）","你打开了宝箱。":"宝箱を開けた。","加油吧，勇者。":"頑張って、勇者よ。","天空之勇者套装":"天空の勇者装束","攻击 +50%":"攻撃 +50%","此分类暂无物品":"この分類にアイテムはない","自由探索海拉鲁":"ハイラルを自由に探索","获得大师之剑！":"マスターソードを手に入れた！","金属武器引雷！":"金属の武器は雷を呼ぶ！","一次射出3支箭。":"一度に3本の矢を放つ。","卓拉族英杰武器。":"ゾーラ族の英傑の武器。","将在初始台地复活":"始まりの台地で復活する","旅行者常用的弓。":"旅人がよく使う弓。","潜行提升 65%":"潜行アップ 65%","符文 · 静止器":"ルーン · ビタロック","选择食材放入锅中":"食材を選んで鍋に入れる","骑士团制式盾牌。":"騎士団の制式盾。","km/h · 羁绊":"km/h · 絆","与老人对话了解使命":"老人と話して使命を知る","你已经拥有大师之剑":"あなたはもうマスターソードを持っている","守护者被盾反击破！":"ガーディアンをジャストガードで撃破！","敏捷的蜥蜴型魔物。":"敏捷なトカゲ型の魔物。","海 拉 鲁 大 陆":"ハイラル","符文 · 磁力抓取":"ルーン · マグネシス","耐寒 · 雪原行动":"耐寒 · 雪原行動","英杰之诗已在进行中":"英傑の詩は進行中","顺序错误，重新开始":"順番が違う、やり直し","你终于回来了，林克。":"やっと戻ってきたのね、リンク。","台座上的剑纹丝不动。":"台座の剣はびくともしない。","王族流传的华丽盾牌。":"王家に伝わる華麗な盾。","离开台地，前往四神兽":"台地を離れ、四神獣のもとへ","这里有不少旅人经过。":"ここは旅人がよく通る。","任天堂Switch衬衫":"Nintendo Switchシャツ","古代盾 · 自动盾反！":"古代盾 · 自動ジャストガード！","回生之祠 · 英杰之诗":"回生の祠 · 英傑の詩","对守护者伤害 +25%":"ガーディアンへのダメージ +25%","极寒灵峰锻造的魔法剑。":"極寒の霊峰で鍛えられた魔法の剣。","灼热难耐…需要防火装备":"灼熱でたまらない…防火装備が必要","点击进入 · 建议全屏":"クリックで開始 · 全画面推奨","能自动盾反守护者激光。":"ガーディアンのレーザーを自動でジャストガードする。","锅盖。防御力聊胜于无。":"鍋の蓋。防御力は気休め程度。","风之神兽 · 瓦·梅德":"風の神獣 · ヴァ・メドー","一百年的等待……谢谢你。":"百年もの間、待っていたのよ……ありがとう。","击败灾厄盖侬（第一阶段）":"厄災ガノンを撃破（第一形態）","四英杰在神兽前立下誓言。":"四人の英傑は神獣の前で誓いを立てた。","海拉鲁城堡 · 灾厄盖侬":"ハイラル城 · 厄災ガノン","神兽被夺，英杰相继倒下。":"神獣は奪われ、英傑たちは次々と倒れた。","跑来了（再按 H 上马）":"が走ってきた（もう一度 H で騎乗）","DLC · 英杰之诗 开启":"DLC · 英傑の詩 開始","凝胶状魔物，会弹跳着靠近。":"ゼリー状の魔物。跳ねながら近づいてくる。","建议先去东北方的卓拉领地。":"まずは北東のゾーラの里へ行くといい。","海拉鲁的和平，从今天开始。":"ハイラルの平和は、今日から始まる。","火之神兽 · 瓦·鲁达尼亚":"火の神獣 · ヴァ・ルーダニア","米法的祈福 · 林克复活了":"ミファーの祈り · リンクが復活した","达尔克尔大人是我们的骄傲！":"ダルーク様は我らの誇りだ！","风之神兽还在雪山之上盘旋。":"風の神獣はまだ雪山の上を旋回している。","乌尔波扎的愤怒 · 范围雷电":"ウルボザの怒り · 範囲雷撃","呀哈哈！获得克洛格种子 ×1":"ヤッホー！コログの種 ×1 ゲット","拿起「必杀之剑」，通过试炼。":"「一撃の剣」を手に取り、試練を突破せよ。","攻击 +50% · 鬼神之力":"攻撃 +50% · 鬼神の力","潜行 +30% · 影之公主":"潜行 +30% · 影の姫","被闪电长期照射锻造的魔法剑。":"雷に長く打たれて鍛えられた魔法の剣。","雷之神兽就在西南的沙漠深处。":"雷の神獣は南西の砂漠の奥深くにいる。","一百年前，灾厄盖侬席卷海拉鲁。":"百年前、厄災ガノンはハイラルを席巻した。","先去克洛格森林取得大师之剑吧。":"まずはコログの森でマスターソードを手に入れよう。","城堡上空笼罩着浓重的灾厄气息。":"城の上空には濃い厄災の気配が立ち込めている。","火之神兽就在死亡之山的火山口！":"火の神獣は死の山の火口にいる！","力巴尔大人……他的灵魂还未安息。":"リーバル様……彼の魂はまだ安らかではない。","水之神兽 · 瓦·露塔就在那里。":"水の神獣 · ヴァ・ルータがそこにいる。","如果找到古代零件，记得带回来给我。":"古代の部品を見つけたら、忘れずに持ってきてくれ。","村庄周围能看到守护者的巡逻，小心。":"村の周りではガーディアンが巡回している。気をつけて。","灾厄盖侬已消灭 · 海拉鲁重归和平":"厄災ガノン討伐 · ハイラルに平和が戻った","希卡之石的试炼。完成谜题以通过试炼。":"シーカーストーンの試練。謎を解いて試練を突破せよ。","伪装成岩石的巨大魔物。弱点在背部矿石。":"岩に化けた巨大な魔物。弱点は背中の鉱石。","树木、塔、建筑、岩石——万物皆可攀爬。":"木、塔、建物、岩——すべてを登れる。","你是……男性？这里是女性城镇，请勿入内。":"あなた……男？ここは女性の街よ。入ってはだめ。","左键 连击（长按旋转斩） · 右键 举盾":"左クリック 連続攻撃（長押しで回転斬り） · 右クリック 盾を構える","塞尔达公主在林克面前第一次露出脆弱的表情。":"ゼルダ姫がリンクの前で初めて弱さを見せた。","游泳速度 +40% · 游泳耗力 -30%":"泳ぎ速度 +40% · 泳ぎスタミナ -30%","COOKING POT · 最多 5 种食材":"COOKING POT · 食材は最大5種類","四神兽已全部解放！去克洛格森林寻找大师之剑吧":"四神獣はすべて解放された！コログの森でマスターソードを探そう","四英杰战死，塞尔达公主独自在城堡中牵制着盖侬。":"四人の英傑は戦死し、ゼルダ姫は一人城でガノンを食い止めていた。","来自天空之岛的勇者装束。衣摆上绣着云与鸟的纹样。":"天空の島から来た勇者の装束。裾には雲と鳥の紋様が刺繍されている。","以橡胶与绝缘布缝制的奇装。雷电会顺着衣料导入地面。":"ゴムと絶縁布で縫った奇抜な装束。雷は衣に沿って地面へ逃げる。","格鲁德族世代相传的宝盔。戴上它，天雷也会绕道而行。":"ゲルド族に代々伝わる宝の兜。これをかぶれば、天の雷も道を譲る。","王族近卫的礼装。深蓝与金线交织，披风在风中猎猎作响。":"王族近衛の礼装。深い青と金糸が織りなすマントが風に鳴る。","V 图鉴 · G 英杰 · F5 存档 · F9 读档":"V 図鑑 · G 英傑 · F5 セーブ · F9 ロード","守护者锁定！右键举盾，在激光命中瞬间盾反 3 次可击破":"ガーディアンがロックオン！右クリックで盾を構え、レーザーが当たる瞬間に3回ジャストガードすれば撃破できる","卓拉族以鱼鳞打造的礼装。入水时，衣甲会顺着水流贴合身体。":"ゾーラ族が魚鱗で仕立てた礼装。水に入ると、衣が水流に沿って体に密着する。","Tab 换盾 · F 偷袭 · Shift 冲刺（耗精力）":"Tab 盾変更 · F 不意打ち · Shift ダッシュ（スタミナ消費）","海拉鲁旅人最常见的装束。绿色外衣与结实的皮靴，适合长途跋涉。":"ハイラルの旅人にもっとも見られる装束。緑の上着と頑丈な革靴は長旅にうってつけだ。","攀岩者钟爱的轻装。指尖与鞋底都经过防滑处理，岩壁不再遥不可及。":"登攀者が愛用する軽装。指先と靴底には滑り止めが施され、岩壁はもう遠くない。","散发着紫黑雾气的幻影盔甲。穿上它的人会听见来自另一个世界的低语。":"紫黒の霧をまとう幻影の鎧。身につけた者は異世界からの囁きを聞くという。","用树叶与藤蔓编成的装束。戴上叶子面具，森林里的呀哈哈似乎不再躲藏。":"葉と蔓で編んだ装束。葉の仮面をつけると、森のコログたちはもう隠れないらしい。","一位自称妖精商人的男人留下的绿色紧身衣。穿上它总觉得有人在叫你“汀空”。":"妖精の商人と名乗る男が残した緑のタイツ。着ていると、誰かに「チンクル」と呼ばれている気がしてくる。","冰":"氷","弓":"弓","桥":"橋","空":"空き","(防":"(防御","回复":"回復","坚硬":"硬い","宝箱":"宝箱","山灵":"ヤマビコ","抗电":"耐電","旅人":"旅人","服装":"衣装","村民":"村人","清空":"クリア","生命":"ハートの","盾牌":"盾","米法":"ミファー","耐寒":"耐寒","苹果":"リンゴ","解放":"解放","速速":"速さの","锅盖":"鍋の蓋","青岚":"セイラン","骑乘":"騎乗","兽王盾":"獣王の盾","出现！":"出現！","制冰器":"ビトタケシ","双手剑":"両手剣","士兵盾":"兵士の盾","将在「":"復活地点：「","已装备":"装備：","拉聂尔":"ラネール","旅人马":"タビビト","旧衣服":"古びた服","格鲁德":"ゲルド","火焰剑":"炎の剣","盾牌：":"盾：","英杰服":"英傑の服","融化！":"溶けた！","阿卡莱":"アッカレ","食用「":"食べた：「","鼓隆族":"ゴロン族","⚡ 雷雨":"⚡ 雷雨","乌尔波扎":"ウルボザ","光鳞之枪":"光鱗の槍","初始台地":"始まりの台地","卓拉头冠":"ゾーラの兜","卓拉护腿":"ゾーラのすね当て","卓拉鳞甲":"ゾーラの鎧","古代头盔":"古代兵装の兜","古代齿轮":"古代の歯車","回生之祠":"回生の祠","士兵护腿":"兵士のすね当て","大剑香蕉":"大剣バナナ","存档损坏":"セーブデータが破損している","幻影套装":"幻影の装備","当前任务":"現在のクエスト","拉聂尔塔":"ラネールの塔","攀岩套装":"クライミングセット","旅人上衣":"旅人の服","旋转斩！":"回転斬り！","橡胶头盔":"ゴムの兜","水之神兽":"水の神獣","汀空裤子":"チンクルのタイツ","沙漠头巾":"砂漠のヴォーイの頭巾","没有存档":"セーブデータがない","海布拉塔":"ヘブラの塔","滑翔上衣":"滑翔の服","滑翔裤子":"滑翔のズボン","潜行裤子":"忍びのズボン","火咒盖侬":"火の厄災ガノン","白银丘丘":"白銀チュチュ","神秘老人":"謎の老人","织梦岛帽":"コホリントの帽子","绿色丘丘":"緑チュチュ","英杰裤子":"英傑のズボン","蓝色丘丘":"青チュチュ","蛮族护腿":"蛮族のすね当て","试炼之祠":"試練の祠","近卫头盔":"近衛の兜","速速蘑菇":"ラッシュルーム","铠甲南瓜":"硬いカボチャ","防火套装":"耐火の装備","阿卡莱塔":"アッカレの塔","雪地羽衣":"羽毛の服","雷光头盔":"雷の兜","雷咒盖侬":"雷の厄災ガノン","风咒盖侬":"風の厄災ガノン","骑士之剑":"騎士の剣","鬼神护腿":"鬼神のブーツ","黑暗上衣":"闇の服","黑暗裤子":"闇のズボン","🔥 灼热":"🔥 灼熱","/4 神兽":"/4 神獣","从台座拔剑":"台座から剣を抜く","克洛格种子":"コログの実","呀哈哈套装":"コログの装備","哈特诺驿站":"ハテノ馬宿","心之容器：":"心の器：","时之勇者衣":"時の勇者の服","格鲁德上衣":"ゲルドのトップス","格鲁德套装":"ゲルドの装備","格鲁德裙裤":"ゲルドのサルワール","汀空紧身衣":"チンクルの服","海利亚兜帽":"ハイリアのフード","海利亚裤子":"ハイリアのズボン","灾厄已消散":"厄災は消え去った","烹饪成功！":"料理成功！","盾反成功！":"ジャストガード！","米多娜头盔":"ミドナの兜","织梦岛套装":"コホリントの装備","解放四神兽":"四神獣解放","费罗尼大桥":"フィローネ大橋","雾气弥漫…":"霧が立ち込めてきた…","风之勇者裤":"風の勇者のズボン","魔吉拉面具":"ムジュラの仮面","切换盾牌 ·":"盾を切り替え ·","加巴希夫神庙":"ガバシフの祠","古代兵装·弓":"古代兵装·弓","图米恩科神庙":"トゥミエンコの祠","天空之勇者衣":"天空の勇者の服","拔出大师之剑":"マスターソードを抜く","武器损坏了！":"武器が壊れた！","点击画面关闭":"画面をクリックして閉じる","白银莫力布林":"白銀モリブリン","简单的木盾。":"簡単な木の盾。","红色蜥蜴战士":"赤リザルフォス","蓝色波克布林":"青ボコブリン","讨伐灾厄盖侬":"厄災ガノン討伐","额外黄心 +":"黄ハート追加 +","黄昏之勇者帽":"黄昏の勇者の帽子","黄金波克布林":"黄金ボコブリン","黑色莫力布林":"黒モリブリン","乌尔波扎的愤怒":"ウルボザの怒り","你握住了剑柄。":"剣の柄を握った。","均衡的旅行装束":"バランスの取れた旅装束","希 卡 之 石":"シーカーの石板","旷 野 之 息":"ブレス オブ ザ ワイルド","磁力 · 抓取":"マグネシス · 引き寄せ","英杰之诗 阶段":"英傑たちの詩 フェーズ","达尔克尔的守护":"ダルークの護り","骑士团制式弓。":"騎士団の制式弓。","传送点已注册 ·":"転移点を登録しました ·","去拯救塞尔达吧。":"ゼルダを救いに行こう。","尚未获得英杰技能":"英傑スキルをまだ獲得していない","更容易发现克洛格":"コログを見つけやすくなる","点击格子全部点亮":"マスをクリックしてすべて点灯させよう","获得英杰技能 ·":"英傑スキル獲得 ·","静止器 · 锁定":"ビタロック · ロックオン","……谢谢你，林克。":"……ありがとう、リンク。","从台座拔出大师之剑":"台座からマスターソードを抜く","你当前的心之容器为":"現在の心の器は","抗电 · 雷雨行动":"耐電 · 雷雨行動","最终决战已在进行中":"最終決戦はすでに始まっている","滑翔耗力 -55%":"滑翔スタミナ -55%","符文 · 遥控炸弹":"ルーン · リモコンバクダン","耐火 · 火山行动":"耐火 · 火山行動","莱尼尔的巨大骨剑。":"ライネルが振るう巨大な骨の剣。","驱魔之剑承认了你。":"闇を封じる剣が、あなたを認めた。","制冰器 · 生成冰柱":"ビトタケシ · 氷柱生成","攻击极高，耐久极低。":"攻撃力は極めて高いが、耐久力は極めて低い。","磁力 · 无金属目标":"マグネシス · 金属反応なし","英帕大人一直在等你。":"インパ様がずっとお待ちです。","骑士团配发的单手剑。":"騎士団から配られた片手剣。","你还没解放任何神兽……":"まだどの神獣も解放していない……","哈特诺是个安静的村子。":"ハテノは静かな村だ。","完全免疫雷电 · 抗电":"雷を完全に無効化 · 耐電","旅行者常用的轻便木盾。":"旅人に人気の軽い木の盾。","林克……你终于回来了。":"リンク……やっと戻ってきたのね。","灾厄盖侬 · 最终决战":"厄災ガノン · 最終決戦","烈日灼人…需要耐热装备":"日差しが強烈だ…耐熱装備が必要","莱尼尔首领的强力盾牌。":"ライネルの長の強力な盾。","防御提升 · 金属护甲":"防御力アップ · 金属鎧","任务更新 · 解放四神兽":"クエスト更新 · 四神獣解放","击败魔兽盖侬（第二阶段）":"魔獣ガノンを撃破（第2段階）","回 忆 · MEMORY":"思い出 · MEMORY","海拉鲁士兵的制式单手剑。":"ハイラル兵の制式片手剣。","耐热 · 游泳 +10%":"耐熱 · 泳ぎ +10%","达尔克尔的守护 · 弹反":"ダルークの護り · ジャストガード","text='前往克洛格森林":"text='コログの森へ","力巴尔的勇猛 · 上升气流":"リーバルの猛り · 上昇気流","按 Tab 可以切换盾牌。":"Tabで盾を切り替えられる。","海拉鲁的风，今天也很喧嚣。":"ハイラルの風は今日も騒がしい。","神兽内部弥漫着灾厄的气息。":"神獣の内部には厄災の気配が漂っている。","记住闪烁顺序后点击下方符号":"点滅の順番を覚えて、下の記号をタップしよう","雷之神兽 · 瓦·娜波力斯":"雷の神獣 · ヴァ・ナボリス","你可以在背包里查看你的装备。":"装備はポーチで確認できる。","回忆之力 · 心之容器 +1":"思い出の力 · 心の器 +1","攻击 +10% · 时之勇者":"攻撃 +10% · 時の勇者","游泳 +20% · 风之勇者":"泳ぎ +20% · 風の勇者","潜行 +50% · 诡异气息":"忍び +50% · 怪しき気配","达尔克尔的守护 · 自动弹反":"ダルークの護り · オートジャストガード","一百年的沉睡，海拉鲁已经变了。":"百年の眠りを経て、ハイラルは変わった。","半人马型强大魔物。弱点在头部。":"半人半馬の強力な魔物。弱点は頭部。","攻击 +15% · 黄昏之勇者":"攻撃 +15% · 黄昏の勇者","/* ★ 任务目标 HUD */":"/* ★ クエスト目標 HUD */","图 鉴 · COMPENDIUM":"図鑑 · COMPENDIUM","沿着河往上游走，找卓拉族问问路。":"川を上流へ辿り、ゾーラ族に道を尋ねよう。","如果食物不够，前面有驿站可以休息。":"食料が足りないなら、先の馬宿で休むといい。","水之神兽就在北边，但被灾厄占据了。":"水の神獣は北にあるが、厄災に占拠されている。","这里是初始台地，你是被选中的勇者。":"ここは始まりの台地。あなたは選ばれし勇者だ。","守护者停止运转 · 获得古代齿轮 ×":"ガーディアン停止 · 古代の歯車を入手 ×","记住，塞尔达一直在城堡里牵制着盖侬。":"忘れないで。ゼルダはずっと城でガノンを食い止めている。","如果你收集到克洛格种子，可以来找我玩。":"コログの実を集めたら、遊びに来てね。","没有大师之剑，你无法真正伤害灾厄盖侬。":"マスターソードなしでは、厄災ガノンを真に傷つけることはできない。","去解放四神兽，拔出大师之剑，然后去见她。":"四神獣を解放し、マスターソードを抜いて、彼女に会いに行こう。","需要至少 13 颗心之容器才能拔出此剑。":"この剣を抜くには、心の器が13個以上必要だ。","攀爬速度 +35% · 攀爬耗力 -30%":"登り速度 +35% · 登りスタミナ -30%","马厩旁的马可以骑，靠近后按 E 就能上马。":"馬宿のそばの馬に乗れる。近づいてEを押せば騎乗できる。","v7 · 精力 / 服装 / 骑马 / 环境":"v7 · スタミナ / 衣装 / 騎馬 / 環境","灾厄盖侬倒下…但灾厄并未消散。魔兽盖侬降临！":"厄災ガノンが倒れた…しかし厄災は消えていない。魔獣ガノンが降臨する！","为滑翔者设计的红色装束。兜帽边缘收窄，风阻极小。":"滑翔者のために作られた赤い装束。フードの縁が絞られ、風の抵抗が極めて小さい。","海拉鲁士兵的制式盔甲。厚重，但能抵挡大部分刀剑。":"ハイラル兵の制式鎧。重いが、ほとんどの刃を受け止められる。","M 地图 · I 背包（服装页换装） · C 烹饪":"M マップ · I ポーチ（衣装ページで着替え） · C 料理","古老蛮族的兽骨装束。放弃防御，换来压倒性的攻击力。":"古の蛮族の獣骨装束。防御を捨て、圧倒的な攻撃力を得た。","（Shift 疾驰 / 空格 跳跃 / E 下马）":"（Shift 疾走 / スペース ジャンプ / E 下馬）","来自一座会做梦的小岛的装束。颜色鲜艳得像是童话绘本。":"夢を見る島から来た装束。絵本のように鮮やかな色合い。","程序化 WebGL 原型 · 完整服装 · 骑马探索":"プロシージャルWebGLプロトタイプ · 全衣装 · 騎馬探索","一张散发着不祥气息的彩色面具。戴久了，会听见面具在笑。":"不吉な気配を放つ彩色の仮面。長く被っていると、仮面の笑い声が聞こえる。","格鲁德小镇的传统服饰。金饰与薄纱在沙漠的风中轻轻摇晃。":"ゲルドの町の伝統衣装。金飾りと薄絹が砂漠の風に揺れる。","印着巨大蓝色龙虾的度假衬衫。海风、沙滩与冰镇果汁的味道。":"巨大な青いロブスターがプリントされたリゾートシャツ。潮風と砂浜、冷たいジュースの香り。","塞尔达公主为英杰林克缝制的蓝色上衣。衣摆绣着四神兽的纹章。":"ゼルダ姫が英傑リンクのために縫った青い服。裾には四神獣の紋章が刺繍されている。","鼓隆族打造的耐火石甲。即便走进熔岩旁的灼热地带也能安然无恙。":"ゴロン族が鍛えた耐火の石鎧。溶岩のそばの灼熱地帯でも平気だ。","点击青色传送点传送 · 灰色尚未激活 · M / ESC 关闭":"水色の転移点をクリックで転移 · 灰色は未起動 · M / ESC で閉じる","来自黄昏世界的勇者装束。布料上残留着 twilight 的微光。":"黄昏の世界から来た勇者の装束。布にはトワイライトの微光が残っている。","传说中鬼神所穿的战甲。白色的甲片与红色纹路，仿佛仍残留着神明的怒火。":"伝説の鬼神がまとった戦甲。白い甲片と赤い紋様に、神の怒りが宿っているようだ。","古代希卡技术制造的自动兵器。会锁定目标发射古代激光；盾反 3 次可击破。":"古代シーカー技術で作られた自動兵器。目標を捉えて古代レーザーを放つ。ジャストガード3回で破壊できる。","全部服装已解锁 · I 背包服装页换装 · 靠近马按 E 骑乘 · H 吹哨唤马":"全衣装解放 · I ポーチの衣装ページで着替え · 馬に近づいてEで騎乗 · Hで口笛を吹いて馬を呼ぶ"},"zh-TW":{"与":"與","分":"分","心":"心","火":"火","雷":"雷","关闭":"關閉","回忆":"回憶","夜影":"夜影","对话":"對話","帕雅":"帕雅","攻击":"攻擊","暖暖":"暖暖","木盾":"木盾","栗风":"栗風","潜行":"潛行","白雪":"白雪","离开":"離開","精力":"精力","耐热":"耐熱","草帽":"草帽","赤焰":"赤焰","酥麻":"酥麻","长枪":"長槍","颗。":"顆。","魔物":"魔物","兽神弓":"獸神弓","利特族":"利特族","力巴尔":"力巴爾","哈特尔":"哈特爾","奥尔汀":"奧爾汀","已存档":"已存檔","已解放":"已解放","旅人剑":"旅人劍","旧上衣":"舊上衣","旧裤子":"舊褲子","汀空帽":"汀空帽","王族盾":"王族盾","精 力":"精 力","莱尼尔":"萊尼爾","费罗尼":"費羅尼","雷电剑":"雷電劍","骑士盾":"騎士盾","· 耐久":"· 耐久","❄ 寒冷":"❄ 寒冷","休闲短裤":"休閒短褲","兽神大剑":"獸神大劍","利特驿站":"利特驛站","卓拉套装":"卓拉套裝","卓拉领地":"卓拉領地","双子驿站":"雙子驛站","古代护腿":"古代護腿","吹哨 ·":"吹哨 ·","士兵之剑":"士兵之劍","士兵盔甲":"士兵盔甲","大师之剑":"大師之劍","岩石巨人":"岩石巨人","幻影护腿":"幻影護腿","必杀之剑":"必殺之劍","攀岩上衣":"攀岩上衣","攀岩裤子":"攀岩褲子","旅人之弓":"旅人之弓","暖暖草果":"暖暖草果","橡胶套装":"橡膠套裝","水咒盖侬":"水咒蓋儂","沙滩短裤":"沙灘短褲","沙漠套装":"沙漠套裝","没有盾牌":"沒有盾牌","湖之大桥":"湖之大橋","滑翔兜帽":"滑翔兜帽","潜行上衣":"潛行上衣","潜行面罩":"潛行面罩","灾厄盖侬":"災厄蓋儂","百年等待":"百年等待","精力 +":"精力 +","织梦岛衣":"織夢島衣","英杰上衣":"英傑上衣","莱尼尔角":"萊尼爾角","蛮族头骨":"蠻族頭骨","蛮族胸甲":"蠻族胸甲","费罗尼塔":"費羅尼塔","近卫护腿":"近衛護腿","遥控炸弹":"遙控炸彈","防御 5":"防禦 5","防火护腿":"防火護腿","雪地套装":"雪地套裝","雪地羽裤":"雪地羽褲","雷光护腿":"雷光護腿","静谧公主":"靜謐公主","马匹精力":"馬匹精力","骑士之弓":"騎士之弓","鬼神胸甲":"鬼神胸甲","黑暗头巾":"黑暗頭巾","黑色丘丘":"黑色丘丘","· 骑乘中":"· 騎乘中","你倒下了…":"你倒下了…","初始台地塔":"初始台地塔","呀哈哈藤裤":"克洛格藤褲","失去的战友":"失去的戰友","无特殊效果":"無特殊效果","时之勇者裤":"時之勇者褲","格鲁德大桥":"格魯德大橋","格鲁德守卫":"格魯德守衛","格鲁德驿站":"格魯德驛站","波克布林角":"波克布林角","海利亚大桥":"海利亞大橋","海布拉大桥":"海布拉大橋","灾难的预兆":"災難的預兆","玛奥努神庙":"瑪奧努神廟","离马匹太远":"離馬匹太遠","米法的祈福":"米法的祈福","英杰的誓言":"英傑的誓言","试炼通过证":"試煉通過證","近卫兵套装":"近衛兵套裝","风之勇者帽":"風之勇者帽","飞行守护者":"飛行守護者","中央海拉鲁塔":"中央海拉魯塔","前往卓拉领地":"前往卓拉領地","卡卡利科驿站":"卡卡利科驛站","古代兵装·盾":"古代兵裝·盾","塞尔达的呼唤":"薩爾達的呼喚","天空之勇者裤":"天空之勇者褲","时之勇者套装":"時之勇者套裝","海拉鲁的和平":"海拉魯的和平","瓦摩达伊神庙":"瓦摩達伊神廟","白银蜥蜴战士":"白銀蜥蜴戰士","红色波克布林":"紅色波克布林","腐朽的守护者":"腐朽的守護者","蓝色莫力布林":"藍色莫力布林","选择一件物品":"選擇一件物品","风之勇者套装":"風之勇者套裝","黄昏之勇者衣":"黃昏之勇者衣","黄金蜥蜴战士":"黃金蜥蜴戰士","黑色蜥蜴战士":"黑色蜥蜴戰士","你 倒 下 了":"你 倒 下 了","前往克洛格森林":"前往克洛格森林","大师之剑的台座":"大師之劍的台座","攻击 +20%":"攻擊 +20%","最常见的魔物。":"最常見的魔物。","磁力 · 释放":"磁力 · 釋放","英杰技能冷却中":"英傑技能冷卻中","进入海拉鲁城堡":"進入海拉魯城堡","黄昏之勇者套装":"黃昏之勇者套裝","Switch衬衫":"Switch襯衫","先解放四神兽吧。":"先解放四神獸吧。","完成四座神庙试炼":"完成四座神廟試煉","尚未遇到任何魔物":"尚未遇到任何魔物","正面攻击无法偷袭":"正面攻擊無法偷襲","符文 · 制冰器":"符文 · 製冰器","该传送点尚未激活":"該傳送點尚未啟用","马匹不肯进入深水":"馬匹不肯進入深水","E / 点击 继续":"E / 點擊 繼續","」已经托付给你了。":"」已經託付給你了。","传说中的最强盾牌。":"傳說中的最強盾牌。","士兵配发的金属盾。":"士兵配發的金屬盾。","收集13颗心之容器":"收集13顆心之容器","橡胶套装绝缘了雷电":"橡膠套裝絕緣了雷電","熔岩锻造的魔法剑。":"熔岩鍛造的魔法劍。","精力耗尽，无法冲刺":"精力耗盡，無法衝刺","耐热 · 沙漠行动":"耐熱 · 沙漠行動","雷光头盔引开了雷电":"雷光頭盔引開了雷電","口哨声传不到那么远（":"口哨聲傳不到那麼遠（","旅行者常用的单手剑。":"旅行者常用的單手劍。","神秘的力量尚未苏醒。":"神祕的力量尚未甦醒。","这是你的使命，林克。":"這是你的使命，林克。","克洛格森林 · 大师剑":"克洛格森林 · 大師之劍","四咒盖侬之一就在前方。":"四咒蓋儂之一就在前方。","寒意刺骨…需要防寒装备":"寒意刺骨…需要防寒裝備","无特殊效果 · 纪念装":"無特殊效果 · 紀念裝","水之神兽 · 瓦·露塔":"水之神獸 · 瓦·露塔","点击 / 按 E 复活":"點擊 / 按 E 復活","王族流传的华丽单手剑。":"王族流傳的華麗單手劍。","这里没有马匹落脚的地方":"這裡沒有馬匹落腳的地方","静止器 · 未发现目标":"靜止器 · 未發現目標","……你身上的衣服真特别。":"……你身上的衣服真特別。","击败它，解放英杰的灵魂。":"擊敗它，解放英傑的靈魂。","制冰器 · 需在水边使用":"製冰器 · 需在水邊使用","欢迎来到卓拉领地，林克。":"歡迎來到卓拉領地，林克。","灾厄盖侬分身的四咒之一。":"災厄蓋儂分身的四咒之一。","耐热 · 潜行 +20%":"耐熱 · 潛行 +20%","（看来你需要特殊通行证）":"（看來你需要特殊通行證）","「林克，你一定要活下去。」":"「林克，你一定要活下去。」","听说东边的山顶有个研究所。":"聽說東邊的山頂有個研究所。","攻击 +10% · 梦之岛":"攻擊 +10% · 夢之島","火 / 雷之神兽 · 剩余":"火 / 雷之神獸 · 剩餘","米法大人……她一直在等你。":"米法大人……她一直在等你。","试炼通过 · 获得心之容器":"試煉通過 · 獲得心之容器","雷雨来了…金属装备会引雷！":"雷雨來了…金屬裝備會引雷！","「大师之剑」已加入你的装备。":"「大師之劍」已加入你的裝備。","听说北边的雪山上住着莱尼尔。":"聽說北邊的雪山上住著萊尼爾。","塞尔达独自在城堡中牵制盖侬。":"薩爾達獨自在城堡中牽制蓋儂。","攻击 +10% · 王族威严":"攻擊 +10% · 王族威嚴","潜行 +20% · 奇装异服":"潛行 +20% · 奇裝異服","然后，再次面对四神兽的考验。":"然後，再次面對四神獸的考驗。","速度 0 · 羁绊 100%":"速度 0 · 羈絆 100%","armor') sub=`防御":"armor') sub=`防禦","体型巨大的波克布林，一击沉重。":"體型巨大的波克布林，一擊沉重。","去解放四神兽吧，它们在等待你。":"去解放四神獸吧，它們在等待你。","林克……回生之祠中有新的力量。":"林克……回生之祠中有新的力量。","你看起来很强，一定是个冒险者吧。":"你看起來很強，一定是個冒險者吧。","如果你要上去，记得带上防寒装备。":"如果你要上去，記得帶上防寒裝備。","克洛格森林 · 大师剑的台座在前方":"克洛格森林 · 大師之劍的台座在前方","攻击 +30% · 潜行 +30%":"攻擊 +30% · 潛行 +30%","滑翔耗力 -30% · 天空之勇者":"滑翔耗力 -30% · 天空之勇者","飞行守护者锁定！右键举盾可盾反激光":"飛行守護者鎖定！右鍵舉盾可盾反雷射","希卡之石的功能，我已经解析了一部分。":"希卡之石的功能，我已經解析了一部分。","举盾+空格 盾滑 · 瞄准+空格 后跳":"舉盾+空格 盾滑 · 瞄準+空格 後跳","按 F 可以从背后偷袭未发现你的敌人。":"按 F 可以從背後偷襲未發現你的敵人。","那地方太热了，不过你是勇者应该没问题。":"那地方太熱了，不過你是勇者應該沒問題。","守护者伤害减免 55% · 古代武器强化":"守護者傷害減免 55% · 古代武器強化","DLC武器。一击必杀，但持有者生命降为1。":"DLC武器。一擊必殺，但持有者生命降為1。","旷野之息 · 程序化原型 · 全服装骑马版":"曠野之息 · 程式化原型 · 全服裝騎馬版","举盾+空格 可以盾滑，瞄准+空格 可以后跳。":"舉盾+空格 可以盾滑，瞄準+空格 可以後跳。","WASD 移动 · 空格 跳/爬/滑翔/攀爬跳":"WASD 移動 · 空格 跳/爬/滑翔/攀爬跳","影之公主米多娜的头盔。戴上它，影子会变得更安静。":"影之公主米多娜的頭盔。戴上它，影子會變得更安靜。","被灾厄侵蚀、半埋在地下的守护者。眼睛仍然是弱点。":"被災厄侵蝕、半埋在地下的守護者。眼睛仍然是弱點。","从沉睡中醒来时穿着的旧衣。轻便，但几乎没有防御力。":"從沉睡中醒來時穿著的舊衣。輕便，但幾乎沒有防禦力。","格鲁德地区商旅的装束。轻薄的布料能反射灼热的日光。":"格魯德地區商旅的裝束。輕薄的布料能反射灼熱的日光。","H 吹哨唤马 / 上下马 · 马上 Shift 疾驰":"H 吹哨喚馬 / 上下馬 · 馬上 Shift 疾馳","海布拉猎人的厚实羽衣。蓬松的羽领能挡住最刺骨的寒风。":"海布拉獵人的厚實羽衣。蓬鬆的羽領能擋住最刺骨的寒風。","空中巡逻的古代自动兵器。螺旋桨是其标志，眼睛是弱点。":"空中巡邏的古代自動兵器。螺旋槳是其標誌，眼睛是弱點。","R 瞄准 · 1-4 符文 · Q 使用 · E 交互":"R 瞄準 · 1-4 符文 · Q 使用 · E 互動","乘着海风航行的勇者装束。衣料轻盈，仿佛随时会被风带走。":"乘著海風航行的勇者裝束。衣料輕盈，彷彿隨時會被風帶走。","跨越时光的勇者装束。绿色衣摆上还沾着海拉鲁原野的草香。":"跨越時光的勇者裝束。綠色衣擺上還沾著海拉魯原野的草香。","漆黑如夜的装束。布料上没有任何反光，像是把光都吞了进去。":"漆黑如夜的裝束。布料上沒有任何反光，像是把光都吞了進去。","希卡古代技术打造的白金装甲。齿轮与蓝色能量线在甲片间流动。":"希卡古代技術打造的白金裝甲。齒輪與藍色能量線在甲片間流動。","忍者一族的深色装束。布料经过特殊处理，行动时几乎不会发出声响。":"忍者一族的深色裝束。布料經過特殊處理，行動時幾乎不會發出聲響。","一件印着游戏机标志的红色纪念衫。穿上它，仿佛随时可以开始新的冒险。":"一件印著遊戲機標誌的紅色紀念衫。穿上它，彷彿隨時可以開始新的冒險。","海拉鲁全景 · 全部服装套装 · 骑马与精力 · 古代守护者 · 万物可攀":"海拉魯全景 · 全部服裝套裝 · 騎馬與精力 · 古代守護者 · 萬物可攀","atk:'攻击',def:'防御',spd:'速度',stealth:'潜行',cold:'耐寒',heat:'耐热',shock:'抗电":"atk:'攻擊',def:'防禦',spd:'速度',stealth:'潛行',cold:'耐寒',heat:'耐熱',shock:'抗電","水之神兽 · 瓦·露塔':'water','风之神兽 · 瓦·梅德':'wind','火之神兽 · 瓦·鲁达尼亚':'fire','雷之神兽 · 瓦·娜波力斯':'thunder":"水之神獸 · 瓦·露塔':'water','風之神獸 · 瓦·梅德':'wind','火之神獸 · 瓦·魯達尼亞':'fire','雷之神獸 · 瓦·娜波力斯':'thunder","光":"光","圈":"圈","无":"無","秒":"秒","马":"馬","冰冷":"冰冷","在「":"在「","大剑":"大劍","属性":"屬性","怪物":"怪物","料理":"料理","月牙":"月牙","材料":"材料","海鲜":"海鮮","烹饪":"烹飪","白马":"白馬","空手":"空手","耐久":"耐久","英帕":"英帕","装备":"裝備","速度":"速度","金鬃":"金鬃","防御":"防禦","食用":"食用","」复活":"」復活","冰雪剑":"冰雪劍","利特村":"利特村","单手剑":"單手劍","塞尔达":"薩爾達","守护者":"守護者","已拔出":"已拔出","已读档":"已讀檔","旅人盾":"旅人盾","旧头巾":"舊頭巾","普尔亚":"普爾亞","海布拉":"海布拉","盾滑！":"盾滑！","背 包":"背 包","蒸发！":"蒸發！","锅已满":"鍋已滿","静止器":"靜止器","鼓隆城":"鼓隆城","☀ 炎热":"☀ 炎熱","下马 ·":"下馬 ·","传送 ·":"傳送 ·","冰冷蜜瓜":"冰冷蜜瓜","卓拉大桥":"卓拉大橋","卓拉守卫":"卓拉守衛","卓拉驿站":"卓拉驛站","古代兵装":"古代兵裝","古代胸甲":"古代胸甲","哈特诺村":"哈特諾村","士兵头盔":"士兵頭盔","士兵胸甲":"士兵胸甲","奥尔汀塔":"奧爾汀塔","幻影头盔":"幻影頭盔","幻影胸甲":"幻影胸甲","怪物素材":"怪物素材","攀岩头巾":"攀岩頭巾","攀爬成功":"攀爬成功","旅人裤子":"旅人褲子","格鲁德塔":"格魯德塔","橡胶护腿":"橡膠護腿","汀空套装":"汀空套裝","沙漠上衣":"沙漠上衣","沙漠长裤":"沙漠長褲","海利亚盾":"海利亞盾","湖畔驿站":"湖畔驛站","滑翔套装":"滑翔套裝","潜行套装":"潛行套裝","火之神兽":"火之神獸","王族之剑":"王族之劍","磁力抓取":"磁力抓取","精力耗尽":"精力耗盡","织梦岛裤":"織夢島褲","英杰头巾":"英傑頭巾","获得了「":"獲得了「","蛮族套装":"蠻族套裝","试炼 ·":"試煉 ·","达尔克尔":"達爾克爾","近卫胸甲":"近衛胸甲","酥麻水果":"酥麻水果","防火头盔":"防火頭盔","防火胸甲":"防火胸甲","雪地羽帽":"雪地羽帽","雷之神兽":"雷之神獸","雷光胸甲":"雷光胸甲","风之神兽":"風之神獸","骑乘 ·":"騎乘 ·","鬼神套装":"鬼神套裝","鬼神面具":"鬼神面具","黑暗套装":"黑暗套裝","鼓隆驿站":"鼓隆驛站","中央海拉鲁":"中央海拉魯","偷袭！×8":"偷襲！×8","卡卡利科村":"卡卡利科村","呀哈哈面具":"克洛格面具","已换上 ·":"已換上 ·","时之勇者帽":"時之勇者帽","最后的嘱托":"最後的囑託","格鲁德头饰":"格魯德頭飾","格鲁德小镇":"格魯德小鎮","橡胶紧身衣":"橡膠緊身衣","海利亚上衣":"海利亞上衣","海利亚套装":"海利亞套裝","海拉鲁城堡":"海拉魯城堡","烹 饪 锅":"烹 飪 鍋","生命大萝卜":"生命大蘿蔔","符文冷却中":"符文冷卻中","红色鸭舌帽":"紅色鴨舌帽","蜥蜴战士角":"蜥蜴戰士角","试炼通过！":"試煉通過！","近卫双手剑":"近衛雙手劍","风之勇者衣":"風之勇者衣","驱魔之剑。":"驅魔之劍。","你终于醒了。":"你終於醒了。","力巴尔的勇猛":"力巴爾的勇猛","发射古代箭。":"發射古代箭。","呀哈哈树叶衣":"克洛格樹葉衣","天空之勇者帽":"天空之勇者帽","开始下雨了…":"開始下雨了…","此神兽已解放":"此神獸已解放","灾厄的化身。":"災厄的化身。","白银波克布林":"白銀波克布林","盾牌损坏了！":"盾牌損壞了！","红色莫力布林":"紅色莫力布林","蓝色大虾衬衫":"藍色大蝦襯衫","蓝色蜥蜴战士":"藍色蜥蜴戰士","附近没有马匹":"附近沒有馬匹","马匹受惊了！":"馬匹受驚了！","黄昏之勇者裤":"黃昏之勇者褲","黑色波克布林":"黑色波克布林","（H 吹哨）":"（H 吹哨）","你打开了宝箱。":"你打開了寶箱。","加油吧，勇者。":"加油吧，勇者。","天空之勇者套装":"天空之勇者套裝","攻击 +50%":"攻擊 +50%","此分类暂无物品":"此分類暫無物品","自由探索海拉鲁":"自由探索海拉魯","获得大师之剑！":"獲得大師之劍！","金属武器引雷！":"金屬武器引雷！","一次射出3支箭。":"一次射出3支箭。","卓拉族英杰武器。":"卓拉族英傑武器。","将在初始台地复活":"將在初始台地復活","旅行者常用的弓。":"旅行者常用的弓。","潜行提升 65%":"潛行提升 65%","符文 · 静止器":"符文 · 靜止器","选择食材放入锅中":"選擇食材放入鍋中","骑士团制式盾牌。":"騎士團制式盾牌。","km/h · 羁绊":"km/h · 羈絆","与老人对话了解使命":"與老人對話了解使命","你已经拥有大师之剑":"你已經擁有大師之劍","守护者被盾反击破！":"守護者被盾反擊破！","敏捷的蜥蜴型魔物。":"敏捷的蜥蜴型魔物。","海 拉 鲁 大 陆":"海 拉 魯 大 陸","符文 · 磁力抓取":"符文 · 磁力抓取","耐寒 · 雪原行动":"耐寒 · 雪原行動","英杰之诗已在进行中":"英傑之詩已在進行中","顺序错误，重新开始":"順序錯誤，重新開始","你终于回来了，林克。":"你終於回來了，林克。","台座上的剑纹丝不动。":"台座上的劍紋絲不動。","王族流传的华丽盾牌。":"王族流傳的華麗盾牌。","离开台地，前往四神兽":"離開台地，前往四神獸","这里有不少旅人经过。":"這裡有不少旅人經過。","任天堂Switch衬衫":"任天堂Switch襯衫","古代盾 · 自动盾反！":"古代盾 · 自動盾反！","回生之祠 · 英杰之诗":"回生之祠 · 英傑之詩","对守护者伤害 +25%":"對守護者傷害 +25%","极寒灵峰锻造的魔法剑。":"極寒靈峰鍛造的魔法劍。","灼热难耐…需要防火装备":"灼熱難耐…需要防火裝備","点击进入 · 建议全屏":"點擊進入 · 建議全螢幕","能自动盾反守护者激光。":"能自動盾反守護者雷射。","锅盖。防御力聊胜于无。":"鍋蓋。防禦力聊勝於無。","风之神兽 · 瓦·梅德":"風之神獸 · 瓦·梅德","一百年的等待……谢谢你。":"一百年的等待……謝謝你。","击败灾厄盖侬（第一阶段）":"擊敗災厄蓋儂（第一階段）","四英杰在神兽前立下誓言。":"四英傑在神獸前立下誓言。","海拉鲁城堡 · 灾厄盖侬":"海拉魯城堡 · 災厄蓋儂","神兽被夺，英杰相继倒下。":"神獸被奪，英傑相繼倒下。","跑来了（再按 H 上马）":"跑來了（再按 H 上馬）","DLC · 英杰之诗 开启":"DLC · 英傑之詩 開啟","凝胶状魔物，会弹跳着靠近。":"凝膠狀魔物，會彈跳著靠近。","建议先去东北方的卓拉领地。":"建議先去東北方的卓拉領地。","海拉鲁的和平，从今天开始。":"海拉魯的和平，從今天開始。","火之神兽 · 瓦·鲁达尼亚":"火之神獸 · 瓦·魯達尼亞","米法的祈福 · 林克复活了":"米法的祈福 · 林克復活了","达尔克尔大人是我们的骄傲！":"達爾克爾大人是我們的驕傲！","风之神兽还在雪山之上盘旋。":"風之神獸還在雪山之上盤旋。","乌尔波扎的愤怒 · 范围雷电":"烏爾波扎的憤怒 · 範圍雷電","呀哈哈！获得克洛格种子 ×1":"呀哈哈！獲得克洛格種子 ×1","拿起「必杀之剑」，通过试炼。":"拿起「必殺之劍」，通過試煉。","攻击 +50% · 鬼神之力":"攻擊 +50% · 鬼神之力","潜行 +30% · 影之公主":"潛行 +30% · 影之公主","被闪电长期照射锻造的魔法剑。":"被閃電長期照射鍛造的魔法劍。","雷之神兽就在西南的沙漠深处。":"雷之神獸就在西南的沙漠深處。","一百年前，灾厄盖侬席卷海拉鲁。":"一百年前，災厄蓋儂席捲海拉魯。","先去克洛格森林取得大师之剑吧。":"先去克洛格森林取得大師之劍吧。","城堡上空笼罩着浓重的灾厄气息。":"城堡上空籠罩著濃重的災厄氣息。","火之神兽就在死亡之山的火山口！":"火之神獸就在死亡之山的火山口！","力巴尔大人……他的灵魂还未安息。":"力巴爾大人……他的靈魂還未安息。","水之神兽 · 瓦·露塔就在那里。":"水之神獸 · 瓦·露塔就在那裡。","如果找到古代零件，记得带回来给我。":"如果找到古代零件，記得帶回來給我。","村庄周围能看到守护者的巡逻，小心。":"村莊周圍能看到守護者的巡邏，小心。","灾厄盖侬已消灭 · 海拉鲁重归和平":"災厄蓋儂已消滅 · 海拉魯重歸和平","希卡之石的试炼。完成谜题以通过试炼。":"希卡之石的試煉。完成謎題以通過試煉。","伪装成岩石的巨大魔物。弱点在背部矿石。":"偽裝成岩石的巨大魔物。弱點在背部礦石。","树木、塔、建筑、岩石——万物皆可攀爬。":"樹木、塔、建築、岩石——萬物皆可攀爬。","你是……男性？这里是女性城镇，请勿入内。":"你是……男性？這裡是女性城鎮，請勿入內。","左键 连击（长按旋转斩） · 右键 举盾":"左鍵 連擊（長按旋轉斬） · 右鍵 舉盾","塞尔达公主在林克面前第一次露出脆弱的表情。":"薩爾達公主在林克面前第一次露出脆弱的表情。","游泳速度 +40% · 游泳耗力 -30%":"游泳速度 +40% · 游泳耗力 -30%","COOKING POT · 最多 5 种食材":"COOKING POT · 最多 5 種食材","四神兽已全部解放！去克洛格森林寻找大师之剑吧":"四神獸已全部解放！去克洛格森林尋找大師之劍吧","四英杰战死，塞尔达公主独自在城堡中牵制着盖侬。":"四英傑戰死，薩爾達公主獨自在城堡中牽制著蓋儂。","来自天空之岛的勇者装束。衣摆上绣着云与鸟的纹样。":"來自天空之島的勇者裝束。衣襬上繡著雲與鳥的紋樣。","以橡胶与绝缘布缝制的奇装。雷电会顺着衣料导入地面。":"以橡膠與絕緣布縫製的奇裝。雷電會順著衣料導入地面。","格鲁德族世代相传的宝盔。戴上它，天雷也会绕道而行。":"格魯德族世代相傳的寶盔。戴上它，天雷也會繞道而行。","王族近卫的礼装。深蓝与金线交织，披风在风中猎猎作响。":"王族近衛的禮裝。深藍與金線交織，披風在風中獵獵作響。","V 图鉴 · G 英杰 · F5 存档 · F9 读档":"V 圖鑑 · G 英傑 · F5 存檔 · F9 讀檔","守护者锁定！右键举盾，在激光命中瞬间盾反 3 次可击破":"守護者鎖定！右鍵舉盾，在雷射命中瞬間盾反 3 次可擊破","卓拉族以鱼鳞打造的礼装。入水时，衣甲会顺着水流贴合身体。":"卓拉族以魚鱗打造的禮裝。入水時，衣甲會順著水流貼合身體。","Tab 换盾 · F 偷袭 · Shift 冲刺（耗精力）":"Tab 換盾 · F 偷襲 · Shift 衝刺（耗精力）","海拉鲁旅人最常见的装束。绿色外衣与结实的皮靴，适合长途跋涉。":"海拉魯旅人最常見的裝束。綠色外衣與結實的皮靴，適合長途跋涉。","攀岩者钟爱的轻装。指尖与鞋底都经过防滑处理，岩壁不再遥不可及。":"攀岩者鍾愛的輕裝。指尖與鞋底都經過防滑處理，岩壁不再遙不可及。","散发着紫黑雾气的幻影盔甲。穿上它的人会听见来自另一个世界的低语。":"散發著紫黑霧氣的幻影盔甲。穿上它的人會聽見來自另一個世界的低語。","用树叶与藤蔓编成的装束。戴上叶子面具，森林里的呀哈哈似乎不再躲藏。":"用樹葉與藤蔓編成的裝束。戴上葉子面具，森林裡的克洛格似乎不再躲藏。","一位自称妖精商人的男人留下的绿色紧身衣。穿上它总觉得有人在叫你“汀空”。":"一位自稱妖精商人的男人留下的綠色緊身衣。穿上它總覺得有人在叫你「汀空」。","冰":"冰","弓":"弓","桥":"橋","空":"空","(防":"(防","回复":"回復","坚硬":"堅硬","宝箱":"寶箱","山灵":"山靈","抗电":"抗電","旅人":"旅人","服装":"服裝","村民":"村民","清空":"清空","生命":"生命","盾牌":"盾牌","米法":"米法","耐寒":"耐寒","苹果":"蘋果","解放":"解放","速速":"速速","锅盖":"鍋蓋","青岚":"青嵐","骑乘":"騎乘","兽王盾":"獸王盾","出现！":"出現！","制冰器":"製冰器","双手剑":"雙手劍","士兵盾":"士兵盾","将在「":"將在「","已装备":"已裝備","拉聂尔":"拉聶爾","旅人马":"旅人馬","旧衣服":"舊衣服","格鲁德":"格魯德","火焰剑":"火焰劍","盾牌：":"盾牌：","英杰服":"英傑服","融化！":"融化！","阿卡莱":"阿卡萊","食用「":"食用「","鼓隆族":"鼓隆族","⚡ 雷雨":"⚡ 雷雨","乌尔波扎":"烏爾波扎","光鳞之枪":"光鱗之槍","初始台地":"初始台地","卓拉头冠":"卓拉頭冠","卓拉护腿":"卓拉護腿","卓拉鳞甲":"卓拉鱗甲","古代头盔":"古代頭盔","古代齿轮":"古代齒輪","回生之祠":"回生之祠","士兵护腿":"士兵護腿","大剑香蕉":"大劍香蕉","存档损坏":"存檔損壞","幻影套装":"幻影套裝","当前任务":"當前任務","拉聂尔塔":"拉聶爾塔","攀岩套装":"攀岩套裝","旅人上衣":"旅人上衣","旋转斩！":"旋轉斬！","橡胶头盔":"橡膠頭盔","水之神兽":"水之神獸","汀空裤子":"汀空褲子","沙漠头巾":"沙漠頭巾","没有存档":"沒有存檔","海布拉塔":"海布拉塔","滑翔上衣":"滑翔上衣","滑翔裤子":"滑翔褲子","潜行裤子":"潛行褲子","火咒盖侬":"火咒蓋儂","白银丘丘":"白銀丘丘","神秘老人":"神祕老人","织梦岛帽":"織夢島帽","绿色丘丘":"綠色丘丘","英杰裤子":"英傑褲子","蓝色丘丘":"藍色丘丘","蛮族护腿":"蠻族護腿","试炼之祠":"試煉之祠","近卫头盔":"近衛頭盔","速速蘑菇":"速速蘑菇","铠甲南瓜":"鎧甲南瓜","防火套装":"防火套裝","阿卡莱塔":"阿卡萊塔","雪地羽衣":"雪地羽衣","雷光头盔":"雷光頭盔","雷咒盖侬":"雷咒蓋儂","风咒盖侬":"風咒蓋儂","骑士之剑":"騎士之劍","鬼神护腿":"鬼神護腿","黑暗上衣":"黑暗上衣","黑暗裤子":"黑暗褲子","🔥 灼热":"🔥 灼熱","/4 神兽":"/4 神獸","从台座拔剑":"從台座拔劍","克洛格种子":"克洛格種子","呀哈哈套装":"克洛格套裝","哈特诺驿站":"哈特諾驛站","心之容器：":"心之容器：","时之勇者衣":"時之勇者衣","格鲁德上衣":"格魯德上衣","格鲁德套装":"格魯德套裝","格鲁德裙裤":"格魯德裙褲","汀空紧身衣":"汀空緊身衣","海利亚兜帽":"海利亞兜帽","海利亚裤子":"海利亞褲子","灾厄已消散":"災厄已消散","烹饪成功！":"烹飪成功！","盾反成功！":"盾反成功！","米多娜头盔":"米多娜頭盔","织梦岛套装":"織夢島套裝","解放四神兽":"解放四神獸","费罗尼大桥":"費羅尼大橋","雾气弥漫…":"霧氣瀰漫…","风之勇者裤":"風之勇者褲","魔吉拉面具":"魔吉拉面具","切换盾牌 ·":"切換盾牌 ·","加巴希夫神庙":"加巴希夫神廟","古代兵装·弓":"古代兵裝·弓","图米恩科神庙":"圖米恩科神廟","天空之勇者衣":"天空之勇者衣","拔出大师之剑":"拔出大師之劍","武器损坏了！":"武器損壞了！","点击画面关闭":"點擊畫面關閉","白银莫力布林":"白銀莫力布林","简单的木盾。":"簡單的木盾。","红色蜥蜴战士":"紅色蜥蜴戰士","蓝色波克布林":"藍色波克布林","讨伐灾厄盖侬":"討伐災厄蓋儂","额外黄心 +":"額外黃心 +","黄昏之勇者帽":"黃昏之勇者帽","黄金波克布林":"黃金波克布林","黑色莫力布林":"黑色莫力布林","乌尔波扎的愤怒":"烏爾波扎的憤怒","你握住了剑柄。":"你握住了劍柄。","均衡的旅行装束":"均衡的旅行裝束","希 卡 之 石":"希 卡 之 石","旷 野 之 息":"曠 野 之 息","磁力 · 抓取":"磁力 · 抓取","英杰之诗 阶段":"英傑之詩 階段","达尔克尔的守护":"達爾克爾的守護","骑士团制式弓。":"騎士團制式弓。","传送点已注册 ·":"傳送點已註冊 ·","去拯救塞尔达吧。":"去拯救薩爾達吧。","尚未获得英杰技能":"尚未獲得英傑技能","更容易发现克洛格":"更容易發現克洛格","点击格子全部点亮":"點擊格子全部點亮","获得英杰技能 ·":"獲得英傑技能 ·","静止器 · 锁定":"靜止器 · 鎖定","……谢谢你，林克。":"……謝謝你，林克。","从台座拔出大师之剑":"從台座拔出大師之劍","你当前的心之容器为":"你當前的心之容器為","抗电 · 雷雨行动":"抗電 · 雷雨行動","最终决战已在进行中":"最終決戰已在進行中","滑翔耗力 -55%":"滑翔耗力 -55%","符文 · 遥控炸弹":"符文 · 遙控炸彈","耐火 · 火山行动":"耐火 · 火山行動","莱尼尔的巨大骨剑。":"萊尼爾的巨大骨劍。","驱魔之剑承认了你。":"驅魔之劍承認了你。","制冰器 · 生成冰柱":"製冰器 · 生成冰柱","攻击极高，耐久极低。":"攻擊極高，耐久極低。","磁力 · 无金属目标":"磁力 · 無金屬目標","英帕大人一直在等你。":"英帕大人一直在等你。","骑士团配发的单手剑。":"騎士團配發的單手劍。","你还没解放任何神兽……":"你還沒解放任何神獸……","哈特诺是个安静的村子。":"哈特諾是個安靜的村子。","完全免疫雷电 · 抗电":"完全免疫雷電 · 抗電","旅行者常用的轻便木盾。":"旅行者常用的輕便木盾。","林克……你终于回来了。":"林克……你終於回來了。","灾厄盖侬 · 最终决战":"災厄蓋儂 · 最終決戰","烈日灼人…需要耐热装备":"烈日灼人…需要耐熱裝備","莱尼尔首领的强力盾牌。":"萊尼爾首領的強力盾牌。","防御提升 · 金属护甲":"防禦提升 · 金屬護甲","任务更新 · 解放四神兽":"任務更新 · 解放四神獸","击败魔兽盖侬（第二阶段）":"擊敗魔獸蓋儂（第二階段）","回 忆 · MEMORY":"回 憶 · MEMORY","海拉鲁士兵的制式单手剑。":"海拉魯士兵的制式單手劍。","耐热 · 游泳 +10%":"耐熱 · 游泳 +10%","达尔克尔的守护 · 弹反":"達爾克爾的守護 · 盾反","text='前往克洛格森林":"text='前往克洛格森林","力巴尔的勇猛 · 上升气流":"力巴爾的勇猛 · 上升氣流","按 Tab 可以切换盾牌。":"按 Tab 可以切換盾牌。","海拉鲁的风，今天也很喧嚣。":"海拉魯的風，今天也很喧囂。","神兽内部弥漫着灾厄的气息。":"神獸內部瀰漫著災厄的氣息。","记住闪烁顺序后点击下方符号":"記住閃爍順序後點擊下方符號","雷之神兽 · 瓦·娜波力斯":"雷之神獸 · 瓦·娜波力斯","你可以在背包里查看你的装备。":"你可以在背包裡查看你的裝備。","回忆之力 · 心之容器 +1":"回憶之力 · 心之容器 +1","攻击 +10% · 时之勇者":"攻擊 +10% · 時之勇者","游泳 +20% · 风之勇者":"游泳 +20% · 風之勇者","潜行 +50% · 诡异气息":"潛行 +50% · 詭異氣息","达尔克尔的守护 · 自动弹反":"達爾克爾的守護 · 自動盾反","一百年的沉睡，海拉鲁已经变了。":"一百年的沉睡，海拉魯已經變了。","半人马型强大魔物。弱点在头部。":"半人馬型強大魔物。弱點在頭部。","攻击 +15% · 黄昏之勇者":"攻擊 +15% · 黃昏之勇者","/* ★ 任务目标 HUD */":"/* ★ 任務目標 HUD */","图 鉴 · COMPENDIUM":"圖 鑑 · COMPENDIUM","沿着河往上游走，找卓拉族问问路。":"沿著河往上游走，找卓拉族問問路。","如果食物不够，前面有驿站可以休息。":"如果食物不夠，前面有驛站可以休息。","水之神兽就在北边，但被灾厄占据了。":"水之神獸就在北邊，但被災厄佔據了。","这里是初始台地，你是被选中的勇者。":"這裡是初始台地，你是被選中的勇者。","守护者停止运转 · 获得古代齿轮 ×":"守護者停止運轉 · 獲得古代齒輪 ×","记住，塞尔达一直在城堡里牵制着盖侬。":"記住，薩爾達一直在城堡裡牽制著蓋儂。","如果你收集到克洛格种子，可以来找我玩。":"如果你收集到克洛格種子，可以來找我玩。","没有大师之剑，你无法真正伤害灾厄盖侬。":"沒有大師之劍，你無法真正傷害災厄蓋儂。","去解放四神兽，拔出大师之剑，然后去见她。":"去解放四神獸，拔出大師之劍，然後去見她。","需要至少 13 颗心之容器才能拔出此剑。":"需要至少 13 顆心之容器才能拔出此劍。","攀爬速度 +35% · 攀爬耗力 -30%":"攀爬速度 +35% · 攀爬耗力 -30%","马厩旁的马可以骑，靠近后按 E 就能上马。":"馬廄旁的馬可以騎，靠近後按 E 就能上馬。","v7 · 精力 / 服装 / 骑马 / 环境":"v7 · 精力 / 服裝 / 騎馬 / 環境","灾厄盖侬倒下…但灾厄并未消散。魔兽盖侬降临！":"災厄蓋儂倒下…但災厄並未消散。魔獸蓋儂降臨！","为滑翔者设计的红色装束。兜帽边缘收窄，风阻极小。":"為滑翔者設計的紅色裝束。兜帽邊緣收窄，風阻極小。","海拉鲁士兵的制式盔甲。厚重，但能抵挡大部分刀剑。":"海拉魯士兵的制式盔甲。厚重，但能抵擋大部分刀劍。","M 地图 · I 背包（服装页换装） · C 烹饪":"M 地圖 · I 背包（服裝頁換裝） · C 烹飪","古老蛮族的兽骨装束。放弃防御，换来压倒性的攻击力。":"古老蠻族的獸骨裝束。放棄防禦，換來壓倒性的攻擊力。","（Shift 疾驰 / 空格 跳跃 / E 下马）":"（Shift 疾馳 / 空格 跳躍 / E 下馬）","来自一座会做梦的小岛的装束。颜色鲜艳得像是童话绘本。":"來自一座會做夢的小島的裝束。顏色鮮豔得像是童話繪本。","程序化 WebGL 原型 · 完整服装 · 骑马探索":"程式化 WebGL 原型 · 完整服裝 · 騎馬探索","一张散发着不祥气息的彩色面具。戴久了，会听见面具在笑。":"一張散發著不祥氣息的彩色面具。戴久了，會聽見面具在笑。","格鲁德小镇的传统服饰。金饰与薄纱在沙漠的风中轻轻摇晃。":"格魯德小鎮的傳統服飾。金飾與薄紗在沙漠的風中輕輕搖晃。","印着巨大蓝色龙虾的度假衬衫。海风、沙滩与冰镇果汁的味道。":"印著巨大藍色龍蝦的度假襯衫。海風、沙灘與冰鎮果汁的味道。","塞尔达公主为英杰林克缝制的蓝色上衣。衣摆绣着四神兽的纹章。":"薩爾達公主為英傑林克縫製的藍色上衣。衣擺繡著四神獸的紋章。","鼓隆族打造的耐火石甲。即便走进熔岩旁的灼热地带也能安然无恙。":"鼓隆族打造的耐火石甲。即便走進熔岩旁的灼熱地帶也能安然無恙。","点击青色传送点传送 · 灰色尚未激活 · M / ESC 关闭":"點擊青色傳送點傳送 · 灰色尚未啟動 · M / ESC 關閉","来自黄昏世界的勇者装束。布料上残留着 twilight 的微光。":"來自黃昏世界的勇者裝束。布料上殘留著 twilight 的微光。","传说中鬼神所穿的战甲。白色的甲片与红色纹路，仿佛仍残留着神明的怒火。":"傳說中鬼神所穿的戰甲。白色的甲片與紅色紋路，彷彿仍殘留著神明的怒火。","古代希卡技术制造的自动兵器。会锁定目标发射古代激光；盾反 3 次可击破。":"古代希卡技術製造的自動兵器。會鎖定目標發射古代雷射；盾反 3 次可擊破。","全部服装已解锁 · I 背包服装页换装 · 靠近马按 E 骑乘 · H 吹哨唤马":"全部服裝已解鎖 · I 背包服裝頁換裝 · 靠近馬按 E 騎乘 · H 吹哨喚馬"}}};
+  const LANGS = [
+    { id: 'zh-CN', name: '简体中文', nativeName: '简体中文' },
+    { id: 'zh-TW', name: '繁體中文', nativeName: '繁體中文' },
+    { id: 'en', name: 'English', nativeName: 'English' },
+    { id: 'ja', name: '日本語', nativeName: '日本語' }
+  ];
+  const LS_KEY = 'botw_language';
+  const CJK = /[\u3400-\u4dbf\u4e00-\u9fff]/;
+  const CJK_ALL = /[\u3400-\u4dbf\u4e00-\u9fff]/;
+
+  // UI strings added after the original extraction (language/quality/net HUD).
+  const UI_EXTRA = {
+    en: {
+      '语言': 'Language', '画质': 'Graphics', '自动': 'Auto', '高': 'High', '中': 'Medium', '低': 'Low',
+      '本地存档模式': 'Local save mode', '云端已同步': 'Cloud synced', '云端已连接': 'Cloud connected', '离线模式': 'Offline mode',
+      '旅人': 'Traveler', '开始游戏': 'Start Game', '按任意键开始': 'Press any key', '游戏暂停': 'Paused',
+      '已暂停': 'Paused', '恢复': 'Resume', '设置': 'Settings', '返回标题': 'Return to title',
+      '键位说明': 'Controls', '关闭': 'Close', '开启': 'On', '关': 'Off',
+      '未连接服务器': 'Server offline', '连接中…': 'Connecting…', '云存档': 'Cloud Save',
+      '读取云端存档': 'Load cloud save', '上传存档': 'Upload save', '排行榜': 'Leaderboard',
+      '最高记录': 'Best record', '同步成功': 'Synced', '同步失败': 'Sync failed',
+      '已存档（本地）': 'Saved (local)', '已存档（云端）': 'Saved (cloud)', '读取失败': 'Load failed',
+      '正在生成海拉鲁大陆': 'Generating Hyrule', '生成海拉鲁地形': 'Shaping the land',
+      '唤醒勇者': 'Awakening the hero', '生成村落、神庙与植被': 'Raising villages and forests',
+      '魔物正在苏醒': 'Monsters are waking', '绘制海拉鲁地图': 'Drawing the map of Hyrule',
+      '准备就绪': 'Ready', '完成': 'Ready',
+      '无法启动': 'Unable to start', '新游戏': 'New Game', '继续游戏': 'Continue',
+      '语言切换：L 键': 'Language: press L',
+      '关节调试：J 键': 'Joint debug: press J', '性能信息：P 键': 'Performance: press P',
+      '脱离卡住：U 键': 'Unstuck: press U',
+      '帧率': 'FPS', '画质已切换': 'Graphics preset changed',
+      '已装备': 'Equipped', '已换上': 'Equipped',
+      '火': 'Fire', '冰': 'Ice', '雷': 'Thunder', '光': 'Light',
+      '水之神兽': 'Water Divine Beast', '风之神兽': 'Wind Divine Beast',
+      '火之神兽': 'Fire Divine Beast', '雷之神兽': 'Thunder Divine Beast',
+      '神兽': 'Divine Beast', '四大神兽': 'the four Divine Beasts',
+      '平原': 'Plains', '森林': 'Forest', '沙漠': 'Desert', '雪山': 'Snowfield',
+      '火山': 'Volcano', '湖泊': 'Lake', '遗迹': 'Ruins', '神庙': 'Shrine',
+      '村庄': 'Village', '驿站': 'Stable', '塔': 'Tower', '城堡': 'Castle',
+      '东': 'East', '南': 'South', '西': 'West', '北': 'North',
+      '距离': 'Distance', '耐久': 'Durability', '攻击力': 'Attack', '防御力': 'Defense',
+      '神庙': 'Shrines', '希卡塔': 'Sheikah Tower', '城镇': 'Town', '当前位置': 'Current position',
+      '尚未激活': 'Not activated', '已脱离卡住': 'Unstuck', '云端存档已同步': 'Cloud save synced', '盖侬': 'Ganon',
+      '没有存档': 'No save data', '没有存档 · 正在读取云端…': 'No save data · reading cloud…',
+      '完美闪避 · 突击': 'Perfect Dodge · Flurry Rush',
+      '血月升起…魔物复活了': 'The Blood Moon rises… monsters have revived',
+      '达尔克尔的守护 · 三层护盾': "Daruk's Protection · 3 charges",
+      '拖动平移 · 滚轮缩放 · 点击青色神庙传送 · 灰色尚未激活 · M / ESC 关闭':
+        'Drag to pan · Wheel to zoom · Click a cyan Shrine to travel · Gray means not activated · M/ESC to close',
+      '点击青色传送点传送 · 灰色尚未激活 · M / ESC 关闭':
+        'Click a cyan travel point · Gray means not activated · M/ESC to close',
+      '关节调试 J · 性能信息 P · 脱离卡住 U · 切换语言 L':
+        'Joint debug J · Performance P · Unstuck U · Language L',
+      'F1 关闭帮助 · F2 切换画质': 'F1 close help · F2 graphics preset',
+      '帮助': 'Help',
+      '克洛格森林': 'Korok Forest', '卡卡利科': 'Kakariko', '海利亚湖': 'Lake Hylia',
+      '死亡之山': 'Death Mountain', '哈特诺': 'Hateno', '哈特尔': 'Necluda',
+      '中央海拉鲁': 'Central Hyrule', '海拉鲁城堡': 'Hyrule Castle', '灾厄盖侬': 'Calamity Ganon'
+    },
+    ja: {
+      '语言': '言語', '画质': '画質', '自动': '自動', '高': '高', '中': '中', '低': '低',
+      '本地存档模式': 'ローカルセーブ', '云端已同步': 'クラウド同期済み', '云端已连接': 'クラウド接続済み', '离线模式': 'オフライン',
+      '旅人': '旅人', '开始游戏': 'ゲーム開始', '按任意键开始': 'キーを押してください', '游戏暂停': 'ポーズ',
+      '已暂停': '一時停止中', '恢复': '再開', '设置': '設定', '返回标题': 'タイトルへ',
+      '键位说明': '操作説明', '关闭': '閉じる', '开启': 'オン', '关': 'オフ',
+      '未连接服务器': 'サーバー未接続', '连接中…': '接続中…', '云存档': 'クラウドセーブ',
+      '读取云端存档': 'クラウドを読み込む', '上传存档': 'アップロード', '排行榜': 'ランキング',
+      '最高记录': 'ベスト記録', '同步成功': '同期完了', '同步失败': '同期失敗',
+      '已存档（本地）': 'セーブしました（ローカル）', '已存档（云端）': 'セーブしました（クラウド）', '读取失败': '読み込み失敗',
+      '正在生成海拉鲁大陆': 'ハイラル大陸を生成中', '生成海拉鲁地形': '地形を生成中',
+      '唤醒勇者': '勇者を目覚めさせる', '生成村落、神庙与植被': '村・祠・森を生成中',
+      '魔物正在苏醒': '魔物が目覚める', '绘制海拉鲁地图': 'ハイラル地図を描画中',
+      '准备就绪': '準備完了', '完成': '完了',
+      '无法启动': '起動できません', '新游戏': '新しいゲーム', '继续游戏': '続きから',
+      '语言切换：L 键': '言語切替：Lキー',
+      '关节调试：J 键': '関節デバッグ：Jキー', '性能信息：P 键': 'パフォーマンス：Pキー',
+      '脱离卡住：U 键': 'スタック解除：Uキー',
+      '帧率': 'FPS', '画质已切换': '画質を変更しました',
+      '已装备': '装備しました', '已换上': '着替えました',
+      '火': '火', '冰': '氷', '雷': '雷', '光': '光',
+      '水之神兽': '水の神獣', '风之神兽': '風の神獣', '火之神兽': '火の神獣', '雷之神兽': '雷の神獣',
+      '神兽': '神獣', '四大神兽': '四神獣',
+      '平原': '平原', '森林': '森', '沙漠': '砂漠', '雪山': '雪山',
+      '火山': '火山', '湖泊': '湖', '遗迹': '遺跡', '神庙': '祠',
+      '村庄': '村', '驿站': '馬宿', '塔': '塔', '城堡': '城',
+      '东': '東', '南': '南', '西': '西', '北': '北',
+      '距离': '距離', '耐久': '耐久', '攻击力': '攻撃力', '防御力': '防御力',
+      '神庙': '祠', '希卡塔': 'シーカータワー', '城镇': '町', '当前位置': '現在地',
+      '尚未激活': '未起動', '已脱离卡住': 'スタック解除', '云端存档已同步': 'クラウドセーブを同期しました', '盖侬': 'ガノン',
+      '没有存档': 'セーブデータがありません', '没有存档 · 正在读取云端…': 'セーブがありません · クラウドを読み込み中…',
+      '完美闪避 · 突击': 'ジャスト回避 · 乱れ斬り',
+      '血月升起…魔物复活了': '血の月が昇る…魔物が復活した',
+      '达尔克尔的守护 · 三层护盾': 'ダルケルの守り · 3回分',
+      '拖动平移 · 滚轮缩放 · 点击青色神庙传送 · 灰色尚未激活 · M / ESC 关闭':
+        'ドラッグで移動 · ホイールで拡大 · 水色の祠をクリックで転移 · 灰色は未起動 · M/ESCで閉じる',
+      '点击青色传送点传送 · 灰色尚未激活 · M / ESC 关闭':
+        '水色の転移点をクリックで転移 · 灰色は未起動 · M/ESCで閉じる',
+      '关节调试 J · 性能信息 P · 脱离卡住 U · 切换语言 L':
+        '関節デバッグ J · パフォーマンス P · スタック解除 U · 言語 L',
+      'F1 关闭帮助 · F2 切换画质': 'F1 ヘルプを閉じる · F2 画質切替',
+      '帮助': 'ヘルプ',
+      '克洛格森林': 'コログの森', '卡卡利科': 'カカリコ', '海利亚湖': 'ハイリア湖',
+      '死亡之山': '死の山', '哈特诺': 'ハテノ', '哈特尔': 'ネクルダ',
+      '中央海拉鲁': 'ハイラル平原', '海拉鲁城堡': 'ハイラル城', '灾厄盖侬': '厄災ガノン'
+    },
+    'zh-TW': {
+      '语言': '語言', '画质': '畫質', '自动': '自動', '高': '高', '中': '中', '低': '低',
+      '本地存档模式': '本地存檔模式', '云端已同步': '雲端已同步', '云端已连接': '雲端已連接', '离线模式': '離線模式',
+      '旅人': '旅人', '开始游戏': '開始遊戲', '按任意键开始': '按任意鍵開始', '游戏暂停': '遊戲暫停',
+      '已暂停': '已暫停', '恢复': '恢復', '设置': '設定', '返回标题': '返回標題',
+      '键位说明': '按鍵說明', '关闭': '關閉', '开启': '開啟', '关': '關',
+      '未连接服务器': '未連接伺服器', '连接中…': '連接中…', '云存档': '雲端存檔',
+      '读取云端存档': '讀取雲端存檔', '上传存档': '上傳存檔', '排行榜': '排行榜',
+      '最高记录': '最高紀錄', '同步成功': '同步成功', '同步失败': '同步失敗',
+      '已存档（本地）': '已存檔（本地）', '已存档（云端）': '已存檔（雲端）', '读取失败': '讀取失敗',
+      '正在生成海拉鲁大陆': '正在生成海拉魯大陸', '生成海拉鲁地形': '生成海拉魯地形',
+      '唤醒勇者': '喚醒勇者', '生成村落、神庙与植被': '生成村落、神廟與植被',
+      '魔物正在苏醒': '魔物正在甦醒', '绘制海拉鲁地图': '繪製海拉魯地圖',
+      '准备就绪': '準備就緒', '完成': '完成',
+      '无法启动': '無法啟動', '新游戏': '新遊戲', '继续游戏': '繼續遊戲',
+      '语言切换：L 键': '語言切換：L 鍵',
+      '关节调试：J 键': '關節除錯：J 鍵', '性能信息：P 键': '效能資訊：P 鍵',
+      '脱离卡住：U 键': '脫離卡住：U 鍵',
+      '帧率': 'FPS', '画质已切换': '畫質已切換',
+      '已装备': '已裝備', '已换上': '已換上',
+      '火': '火', '冰': '冰', '雷': '雷', '光': '光',
+      '水之神兽': '水之神獸', '风之神兽': '風之神獸', '火之神兽': '火之神獸', '雷之神兽': '雷之神獸',
+      '神兽': '神獸', '四大神兽': '四大神獸',
+      '平原': '平原', '森林': '森林', '沙漠': '沙漠', '雪山': '雪山',
+      '火山': '火山', '湖泊': '湖泊', '遗迹': '遺跡', '神庙': '神廟',
+      '村庄': '村莊', '驿站': '驛站', '塔': '塔', '城堡': '城堡',
+      '东': '東', '南': '南', '西': '西', '北': '北',
+      '距离': '距離', '耐久': '耐久', '攻击力': '攻擊力', '防御力': '防禦力',
+      '神庙': '神廟', '希卡塔': '希卡塔', '城镇': '城鎮', '当前位置': '目前位置',
+      '尚未激活': '尚未啟動', '已脱离卡住': '已脫離卡住', '云端存档已同步': '雲端存檔已同步', '盖侬': '蓋儂',
+      '没有存档': '沒有存檔', '没有存档 · 正在读取云端…': '沒有存檔 · 正在讀取雲端…',
+      '完美闪避 · 突击': '完美閃避 · 突擊',
+      '血月升起…魔物复活了': '血月升起…魔物復活了',
+      '达尔克尔的守护 · 三层护盾': '達爾克爾的守護 · 三層護盾',
+      '拖动平移 · 滚轮缩放 · 点击青色神庙传送 · 灰色尚未激活 · M / ESC 关闭':
+        '拖動平移 · 滾輪縮放 · 點擊青色神廟傳送 · 灰色尚未啟動 · M / ESC 關閉',
+      '点击青色传送点传送 · 灰色尚未激活 · M / ESC 关闭':
+        '點擊青色傳送點傳送 · 灰色尚未啟動 · M / ESC 關閉',
+      '关节调试 J · 性能信息 P · 脱离卡住 U · 切换语言 L':
+        '關節除錯 J · 效能資訊 P · 脫離卡住 U · 語言切換 L',
+      'F1 关闭帮助 · F2 切换画质': 'F1 關閉說明 · F2 切換畫質',
+      '帮助': '說明',
+      '克洛格森林': '克洛格森林', '卡卡利科': '卡卡利科', '海利亚湖': '海利亞湖',
+      '死亡之山': '死亡之山', '哈特诺': '哈特諾', '哈特尔': '哈特爾',
+      '中央海拉鲁': '中央海拉魯', '海拉鲁城堡': '海拉魯城堡', '灾厄盖侬': '災厄蓋儂'
+    },
+    'zh-CN': {}
+  };
+
+  // {n} captures digits, {name} captures a short name; templates use $1..$n.
+  const PAT = [
+    [/^已解放 (\d+)\/4 神兽$/, '已解放 $1/4 神兽', 'Liberated $1/4 Divine Beasts', '神獣を $1/4 体解放', '已解放 $1/4 神獸'],
+    [/^克洛格种子 (\d+)$/, '克洛格种子 $1', 'Korok Seeds $1', 'コログの実 $1', '克洛格種子 $1'],
+    [/^试炼通过证 (\d+)$/, '试炼通过证 $1', 'Spirit Orbs $1', '試練の証 $1', '試煉通過證 $1'],
+    [/^回忆 (\d+)\/(\d+)$/, '回忆 $1/$2', 'Memories $1/$2', '思い出 $1/$2', '回憶 $1/$2'],
+    [/^英杰之诗 阶段(\d+)$/, '英杰之诗 阶段$1', "Champions' Ballad · Stage $1", '英傑の詩 第$1章', '英傑之詩 階段$1'],
+    [/^心之容器：(\d+)\/(\d+)$/, '心之容器：$1/$2', 'Heart Containers: $1/$2', '心の器：$1/$2', '心之容器：$1/$2'],
+    [/^防御 (\d+)$/, '防御 $1', 'Defense $1', '防御力 $1', '防禦 $1'],
+    [/^攻击 (\d+)$/, '攻击 $1', 'Attack $1', '攻撃力 $1', '攻擊 $1'],
+    [/^耐久 (.+)$/, '耐久 $1', 'Durability $1', '耐久値 $1', '耐久 $1'],
+    [/^速度 (\d+) · 羁绊 (\d+)%$/, '速度 $1 · 羁绊 $2%', 'Speed $1 · Bond $2%', '速度 $1 · 絆 $2%', '速度 $1 · 羈絆 $2%'],
+    [/^已换上 · (.+)$/, '已换上 · $1', 'Equipped · $1', '着替えました · $1', '已換上 · $1'],
+    [/^切换盾牌 · (.+)$/, '切换盾牌 · $1', 'Shield switched · $1', '盾を切り替え · $1', '切換盾牌 · $1'],
+    [/^已装备 (.+)$/, '已装备 $1', 'Equipped $1', '装備しました $1', '已裝備 $1'],
+    [/^获得英杰技能 · (.+)$/, '获得英杰技能 · $1', 'Champion Ability Acquired · $1', '英傑スキル獲得 · $1', '獲得英傑技能 · $1'],
+    [/^传送点已注册 · (.+)$/, '传送点已注册 · $1', 'Travel Point registered · $1', '転移点を登録しました · $1', '傳送點已註冊 · $1'],
+    [/^与(.+)对话$/, '与$1对话', 'Talk to $1', '$1と話す', '與$1對話'],
+    [/^试炼 · (.+)$/, '试炼 · $1', 'Trial · $1', '試練 · $1', '試煉 · $1'],
+    [/^解放 (.+)$/, '解放 $1', 'Free the $1', '$1を解放', '解放 $1'],
+    [/^前往(.+)$/, '前往$1', 'Head to $1', '$1へ向かう', '前往$1'],
+    [/^食用「(.+)」$/, '食用「$1」', 'You ate 「$1」', '「$1」を食べた', '食用「$1」'],
+    [/^在「(.+)」复活$/, '在「$1」复活', 'Revived at 「$1」', '「$1」で復活', '在「$1」復活'],
+    [/^将在「(.+)」复活$/, '将在「$1」复活', 'You will revive at 「$1」', '「$1」で復活します', '將在「$1」復活'],
+    [/^已?获得「(.+)」$/, '获得「$1」', 'Obtained 「$1」', '「$1」を手に入れた', '獲得「$1」'],
+    [/^「(.+)」已加入你的装备。$/, '「$1」已加入你的装备。', '「$1」 has been added to your equipment.', '「$1」を装備に追加しました。', '「$1」已加入你的裝備。'],
+    [/^盾牌：(.+)$/, '盾牌：$1', 'Shield: $1', '盾：$1', '盾牌：$1'],
+    [/^(.+)（防(\d+)）$/, '$1（防$2）', '$1 (Def $2)', '$1（防御$2）', '$1（防$2）'],
+    [/^(.+) \(防(\d+)\)$/, '$1（防$2）', '$1 (Def $2)', '$1（防御$2）', '$1（防$2）'],
+    [/^(.+) \[(火|冰|雷|光)\]$/, '$1 [$2]', '$1 [$2]', '$1 [$2]', '$1 [$2]'],
+    [/^额外黄心 \+(\d+)$/, '额外黄心 +$1', 'Extra Hearts +$1', '追加の黄色ハート +$1', '額外黃心 +$1'],
+    [/^回复 (\d+) 心$/, '回复 $1 心', 'Restores $1 hearts', 'ハート$1個回復', '回復 $1 心'],
+    [/^精力 \+(\d+)圈$/, '精力 +$1圈', 'Stamina +$1 wheel(s)', 'スタミナ +$1周', '精力 +$1圈'],
+    [/^(\d+)分(\d+)秒$/, '$1分$2秒', '$1 min $2 sec', '$1分$2秒', '$1分$2秒'],
+    [/^已解锁 (.+)$/, '已解锁 $1', 'Unlocked $1', '$1を解放', '已解鎖 $1'],
+    [/^解锁 (.+)$/, '解锁 $1', 'Unlocked $1', '$1を解放', '解鎖 $1'],
+    [/^距离 (\d+)m$/, '距离 $1m', 'Distance $1m', '距離 $1m', '距離 $1m'],
+    [/^Lv(\d+)$/, 'Lv$1', 'Lv$1', 'Lv$1', 'Lv$1'],
+    [/^神庙 (\d+)\/(\d+)$/, '神庙 $1/$2', 'Shrines $1/$2', '祠 $1/$2', '神廟 $1/$2'],
+    [/^希卡塔 (\d+)\/(\d+)$/, '希卡塔 $1/$2', 'Sheikah Towers $1/$2', 'シーカータワー $1/$2', '希卡塔 $1/$2'],
+    [/^达尔克尔的守护 · (\d+)$/, '达尔克尔的守护 · $1', "Daruk's Protection · $1", 'ダルケルの守り · $1', '達爾克爾的守護 · $1'],
+    [/^血月升起…(\d+) 只魔物复活了$/, '血月升起…$1 只魔物复活了', 'The Blood Moon rises… $1 monsters revived', '血の月が昇る…魔物$1体が復活した', '血月升起…$1 隻魔物復活了']
+  ].map(function (p) {
+    let idx = 1;
+    return { re: p[0], zh: p[1], en: p[2], ja: p[3], tw: p[4] };
+  });
+
+  function detect() {
+    try {
+      const q = new URLSearchParams(location.search).get('lang');
+      if (q && LANGS.some(l => l.id === q)) return q;
+      if (window.BOTW_LANG && LANGS.some(l => l.id === window.BOTW_LANG)) return window.BOTW_LANG;
+      const saved = localStorage.getItem(LS_KEY);
+      if (saved && LANGS.some(l => l.id === saved)) return saved;
+    } catch (e) {}
+    const n = (navigator.language || 'zh-CN').toLowerCase();
+    if (n.indexOf('ja') === 0) return 'ja';
+    if (n.indexOf('zh') === 0) return (n.indexOf('tw') >= 0 || n.indexOf('hk') >= 0 || n.indexOf('mo') >= 0) ? 'zh-TW' : 'zh-CN';
+    if (n.indexOf('en') === 0) return 'en';
+    return 'zh-CN';
+  }
+
+  let current = detect();
+  let cache = new Map();
+  let sortedKeys = [];
+
+  function buildKeys() {
+    const d = DATA.dict[current] || {};
+    const e = UI_EXTRA[current] || {};
+    sortedKeys = Object.keys(d).concat(Object.keys(e)).filter(k => k && k.length >= 2).sort((a, b) => b.length - a.length);
+    cache = new Map();
+  }
+
+  function lookup(s) {
+    if (current === 'zh-CN') return undefined;
+    const d = DATA.dict[current];
+    if (d && Object.prototype.hasOwnProperty.call(d, s)) return d[s];
+    const e = UI_EXTRA[current];
+    if (e && Object.prototype.hasOwnProperty.call(e, s)) return e[s];
+    return undefined;
+  }
+
+  function translateName(name) {
+    const raw = String(name == null ? '' : name);
+    const core = raw.trim();
+    if (!core) return raw;
+    if (!CJK.test(core)) return raw;
+    const direct = lookup(core);
+    if (direct !== undefined) return raw.replace(core, direct);
+    const t = translateCore(core, 2);
+    return raw.replace(core, t);
+  }
+
+  function applyPattern(core) {
+    if (current === 'zh-CN') return null;
+    for (let i = 0; i < PAT.length; i++) {
+      const p = PAT[i];
+      const m = core.match(p.re);
+      if (!m) continue;
+      let tpl = current === 'en' ? p.en : current === 'ja' ? p.ja : current === 'zh-TW' ? p.tw : p.zh;
+      return tpl.replace(/\$(\d+)/g, function (_, n) {
+        const cap = m[Number(n)];
+        return cap === undefined ? '' : translateName(cap);
+      });
+    }
+    return null;
+  }
+
+  function translateCore(core, depth) {
+    if (depth <= 0) return core;
+    if (!CJK.test(core)) return core;
+    const direct = lookup(core);
+    if (direct !== undefined) return direct;
+    const pat = applyPattern(core);
+    if (pat !== null) return pat;
+
+    // split on separators, translate each side
+    const parts = core.split(/(\s*[·：，。！？、；]\s*)/);
+    if (parts.length > 1) {
+      let changed = false;
+      const out = parts.map(function (p) {
+        if (!p) return p;
+        if (!CJK.test(p)) return p;
+        const t = translateCore(p.trim(), depth - 1);
+        if (t !== p.trim()) { changed = true; return p.replace(p.trim(), t); }
+        return p;
+      });
+      if (changed) return out.join('');
+    }
+
+    // number + known unit / prefix + name
+    for (let i = 0; i < sortedKeys.length; i++) {
+      const k = sortedKeys[i];
+      if (k.length < 2 || CJK.test(k[0]) === false) continue;
+      if (core.indexOf(k) === 0) {
+        const rest = core.slice(k.length);
+        if (!rest) return lookup(k);
+        // avoid translating just a common single-character verb inside a longer word
+        let rt = rest;
+        if (/^\s*[\d.,%+\-]/.test(rest) || /^[a-zA-Z]/.test(rest)) {
+          rt = translateCore(rest.trim(), depth - 1);
+          return lookup(k) + rest.replace(rest.trim(), rt);
+        }
+      }
+    }
+    return core;
+  }
+
+  function translateWhole(text) {
+    if (current === 'zh-CN') return text;
+    if (text == null) return text;
+    const str = String(text);
+    if (!CJK.test(str)) return str;
+    const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(str);
+    const lead = m[1], core = m[2], trail = m[3];
+    if (!core) return str;
+    let out;
+    if (cache.has(core)) out = cache.get(core);
+    else { out = translateCore(core, 3); cache.set(core, out); }
+    return lead + out + trail;
+  }
+
+  // ---------- DOM translation ----------
+  const nodeState = new WeakMap();
+  // Intercept textContent writes so per-frame HUD updates are translated
+  // immediately instead of flickering between languages.
+  (function patchTextContent() {
+    const td = Object.getOwnPropertyDescriptor(Node.prototype, 'textContent');
+    if (!td || !td.set) return;
+    Object.defineProperty(Node.prototype, 'textContent', {
+      configurable: true,
+      enumerable: td.enumerable,
+      get: td.get,
+      set: function (v) {
+        if (v == null) { td.set.call(this, v); return; }
+        const s = String(v);
+        if (current !== 'zh-CN' && CJK.test(s)) {
+          const out = translateWhole(s);
+          if (out !== s) {
+            td.set.call(this, out);
+            const tc = this.firstChild;
+            if (tc && tc.nodeType === 3) nodeState.set(tc, { orig: s, out: out });
+            return;
+          }
+        }
+        td.set.call(this, s);
+      }
+    });
+  })();
+  const SKIP_TAGS = { SCRIPT: 1, STYLE: 1, NOSCRIPT: 1, TEXTAREA: 1, CODE: 1, PRE: 1, svg: 1 };
+  function shouldSkip(node) {
+    let el = node.parentNode;
+    let guard = 0;
+    while (el && guard++ < 8) {
+      if (el.nodeType === 1) {
+        if (SKIP_TAGS[el.tagName] || el.classList && el.classList.contains('no-i18n')) return true;
+      }
+      el = el.parentNode;
+    }
+    return false;
+  }
+  function translateTextNode(node) {
+    if (shouldSkip(node)) return;
+    const cur = node.nodeValue;
+    if (!cur) return;
+    let st = nodeState.get(node);
+    if (current === 'zh-CN') {
+      if (st && st.orig && cur === st.out && cur !== st.orig) node.nodeValue = st.orig;
+      return;
+    }
+    if (!CJK.test(cur)) return;
+    if (st) {
+      if (cur === st.out) return;              // already translated
+      if (cur !== st.orig) { st.orig = cur; }  // game changed the text
+      else if (cur === st.orig && st.out && st.out !== cur) {
+        const fresh = translateWhole(cur);
+        if (fresh !== cur) { node.nodeValue = fresh; st.out = fresh; }
+        return;
+      }
+    }
+    const out = translateWhole(cur);
+    if (out !== cur) {
+      nodeState.set(node, { orig: cur, out: out });
+      node.nodeValue = out;
+    } else {
+      nodeState.set(node, { orig: cur, out: cur });
+    }
+  }
+  function restoreDOM(root) {
+    if (!root) return;
+    const w = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let n;
+    while ((n = w.nextNode())) {
+      const st = nodeState.get(n);
+      if (st && st.orig && n.nodeValue === st.out) n.nodeValue = st.orig;
+    }
+    if (root.querySelectorAll) {
+      root.querySelectorAll('[title],[placeholder],[aria-label]').forEach(function (el) {
+        const st = nodeState.get(el);
+        if (!st) return;
+        if (st.titleOut !== undefined && el.title === st.titleOut && st.titleOrig !== undefined) el.title = st.titleOrig;
+        if (st.phOut !== undefined && el.placeholder === st.phOut && st.phOrig !== undefined) el.placeholder = st.phOrig;
+        if (st.ariaOut !== undefined && el.getAttribute('aria-label') === st.ariaOut && st.ariaOrig !== undefined) el.setAttribute('aria-label', st.ariaOrig);
+      });
+    }
+  }
+  function translateDOM(root) {
+    if (!root) return;
+    if (current === 'zh-CN') { restoreDOM(root); return; }
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    let node;
+    while ((node = walker.nextNode())) translateTextNode(node);
+    if (root.querySelectorAll) {
+      root.querySelectorAll('[title],[placeholder],[aria-label]').forEach(function (el) {
+        const st = nodeState.get(el) || {};
+        ['title', 'placeholder', 'aria-label'].forEach(function (attr) {
+          const v = el.getAttribute(attr);
+          if (!v || !CJK.test(v)) return;
+          const key = attr === 'title' ? 'titleOrig' : attr === 'placeholder' ? 'phOrig' : 'ariaOrig';
+          const outKey = attr === 'title' ? 'titleOut' : attr === 'placeholder' ? 'phOut' : 'ariaOut';
+          if (st[key] === undefined) st[key] = v;
+          const out = translateWhole(v);
+          if (out !== v) { el.setAttribute(attr, out); st[outKey] = out; }
+        });
+        nodeState.set(el, st);
+      });
+    }
+  }
+
+  function setLang(id, silent) {
+    if (!LANGS.some(l => l.id === id)) return;
+    if (id === current) { if (!silent) window.dispatchEvent(new CustomEvent('botw:lang', { detail: { lang: id } })); return; }
+    restoreDOM(document.body);
+    current = id;
+    buildKeys();
+    document.documentElement.lang = id;
+    translateDOM(document.body);
+    applyDocumentTitle();
+    try { localStorage.setItem(LS_KEY, id); } catch (e) {}
+    if (!silent) window.dispatchEvent(new CustomEvent('botw:lang', { detail: { lang: id } }));
+  }
+  function applyDocumentTitle() {
+    try { document.title = translateWhole('旷野之息 · 海拉鲁冒险 v9'); } catch (e) {}
+  }
+
+  function cycleLang() {
+    const i = LANGS.findIndex(l => l.id === current);
+    setLang(LANGS[(i + 1) % LANGS.length].id);
+  }
+
+  const api = {
+    version: '1.0.0',
+    langs: LANGS,
+    get current() { return current; },
+    get lang() { return current; },
+    get isZh() { return current === 'zh-CN'; },
+    setLang: setLang,
+    cycle: cycleLang,
+    t: translateWhole,
+    tr: translateWhole,
+    name: translateName,
+    translateDOM: translateDOM,
+    apply: function () { translateDOM(document.body); },
+    tOr: function (text, fallback) { const r = translateWhole(text); return r === text ? (fallback || text) : r; }
+  };
+  window.BOTW_I18N = api;
+
+  // Initialise
+  buildKeys();
+  document.documentElement.lang = current;
+  applyDocumentTitle();
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { translateDOM(document.body); });
+  } else {
+    translateDOM(document.body);
+  }
+  // Periodic DOM pass catches HUD/toast text written after the last frame.
+  setInterval(function () { translateDOM(document.body); }, 420);
+  window.addEventListener('botw:lang', function (e) {
+    translateDOM(document.body);
+  });
+})();
