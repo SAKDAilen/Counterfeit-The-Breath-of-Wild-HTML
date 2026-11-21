@@ -186,7 +186,7 @@ tools/                    开发与测试脚本（截图、语法检查、构建
 ## 致谢
 
 - [three.js](https://threejs.org/) — MIT License
-- 玩法与世界观灵感来自任天堂《塞尔达传说：旷野之息》，版权归任天堂所有。
+- 玩法与世界观灵感来自任天堂《塞尔达传说：旷野之息》。
 - 主线、神庙、DLC 与首领设定参考：[Zelda Wiki](https://zeldawiki.wiki/wiki/Main_Quest)、[Zelda Wiki — Bosses in Breath of the Wild](https://zeldawiki.wiki/wiki/Bosses_in_Breath_of_the_Wild)、[Game8](https://game8.co/games/Zelda-Breath-of-the-Wild/archives/292468)、[IGN DLC Shrines](https://www.ign.com/wikis/the-legend-of-zelda-breath-of-the-wild/DLC_Shrines)、[Eurogamer — EX Champions' Ballad](https://www.eurogamer.net/zelda-breath-of-the-wild-dlc-2-guide-4675)。
 - 120 座神庙名称与试炼名事实数据来自 [Wally869/Shrines-BoTW](https://github.com/Wally869/Shrines-BoTW)（仅使用名称/试炼标题作为档案数据）。
 - 所有代码、几何体、着色器、音效与描述文案为原创；未打包任天堂的贴图、模型、音乐或文本资产。
